@@ -1,0 +1,91 @@
+{
+  "name": "cheprompt",
+  "displayName": "ChePrompt",
+  "description": "El modelo justo para cada laburo: routing transparente para OpenCode desde VS Code.",
+  "version": "0.0.1",
+  "publisher": "fernandonavarro",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Machine Learning",
+    "Other"
+  ],
+  "keywords": [
+    "opencode",
+    "ai",
+    "router",
+    "agents",
+    "models"
+  ],
+  "activationEvents": [
+    "onView:cheprompt.sidebar",
+    "onCommand:cheprompt.open"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "cheprompt.open",
+        "title": "ChePrompt: Abrir router",
+        "category": "ChePrompt"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "cheprompt",
+          "title": "ChePrompt",
+          "icon": "media/hornero.svg"
+        }
+      ]
+    },
+    "views": {
+      "cheprompt": [
+        {
+          "id": "cheprompt.sidebar",
+          "name": "Router"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "ChePrompt",
+      "properties": {
+        "cheprompt.defaultProfile": {
+          "type": "string",
+          "enum": [
+            "economy",
+            "balanced",
+            "quality"
+          ],
+          "enumDescriptions": [
+            "Prioriza el menor impacto sobre los límites de OpenCode Go.",
+            "Equilibra capacidad e impacto de uso.",
+            "Prioriza el modelo más capaz de la selección inicial."
+          ],
+          "default": "balanced",
+          "description": "Perfil de routing usado al abrir ChePrompt."
+        },
+        "cheprompt.opencodePath": {
+          "type": "string",
+          "default": "opencode",
+          "description": "Ruta al ejecutable de OpenCode."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "check": "tsc --noEmit -p ./",
+    "test": "npm run compile && node --test out/test/**/*.test.js",
+    "install:local": "bash scripts/install-local.sh",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/vscode": "^1.140.0",
+    "typescript": "^7.0.2"
+  }
+}
