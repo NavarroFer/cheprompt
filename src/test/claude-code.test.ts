@@ -90,7 +90,8 @@ test("validates Claude Pro through the official auth status without retaining ac
   assert.equal(inventory.runtime.id, "claude-code");
   assert.equal(inventory.runtime.availability, "available");
   assert.equal(inventory.providers[0].name, "Claude Pro");
-  assert.equal(inventory.models.length, 0);
+  assert.equal(inventory.models[0].id, "claude-code/default");
+  assert.equal(inventory.models[0].capabilitiesKnown, false);
   assert.equal(JSON.stringify(inventory).includes("do-not-copy-this"), false);
 });
 

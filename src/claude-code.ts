@@ -14,6 +14,7 @@ import {
   RuntimeExecutionEvent,
   RuntimeExecutionResult,
   RuntimeInventory,
+  RuntimeModel,
   UsageSnapshot,
 } from "./types";
 
@@ -28,6 +29,19 @@ const ENVIRONMENT_OVERRIDES_TO_REMOVE = [
   "CLAUDE_CODE_USE_VERTEX",
   "CLAUDE_CODE_USE_FOUNDRY",
 ] as const;
+
+const CLAUDE_DEFAULT_MODEL: RuntimeModel = {
+  id: "claude-code/default",
+  label: "Claude Code · modelo predeterminado",
+  usageImpact: "medium",
+  strengths: ["modelo predeterminado configurado en Claude Code"],
+  runtimeId: RUNTIME_ID,
+  providerId: PROVIDER_ID,
+  allowancePoolId: PROVIDER_ID,
+  availability: "available",
+  capabilities: ["text", "tools", "reasoning"],
+  capabilitiesKnown: false,
+};
 
 export interface ClaudeAuthStatus {
   loggedIn: boolean;
@@ -110,6 +124,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     return {
       runtimeId: RUNTIME_ID,
       provider: "Claude Pro",
+      allowancePoolId: PROVIDER_ID,
       status: "not-available",
       windows: [],
       source: "Claude Code CLI no informa un porcentaje oficial restante",
@@ -293,7 +308,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     return {
       runtime,
       providers: [provider],
-      models: [],
+      models: [{ ...CLAUDE_DEFAULT_MODEL, availability }],
       discoveredAt: new Date().toISOString(),
     };
   }

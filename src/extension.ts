@@ -12,7 +12,14 @@ import {
   RuntimeExecutionHandle,
 } from "./opencode";
 import { routePrompt } from "./router";
-import { RoutingDecision, RoutingProfile, RuntimeExecutionEvent, RuntimeInventory } from "./types";
+import {
+  RoutingDecision,
+  RoutingProfile,
+  RuntimeExecutionEvent,
+  RuntimeInventory,
+  RuntimeModel,
+  UsageSnapshot,
+} from "./types";
 
 export function activate(context: vscode.ExtensionContext): void {
   const provider = new ChePromptViewProvider(context.extensionUri);
@@ -29,9 +36,11 @@ export function deactivate(): void {}
 
 class ChePromptViewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
+  private initialDiscovery: Promise<void> = Promise.resolve();
   private lastPrompt?: string;
   private lastDecision?: RoutingDecision;
   private inventory?: RuntimeInventory;
+  private usageSnapshots: UsageSnapshot[] = [];
   private claudeAdapter?: ClaudeCodeAdapter;
   private claudeInventory?: RuntimeInventory;
   private codexAdapter?: CodexAdapter;
@@ -50,9 +59,11 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
       localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, "media")],
     };
     view.webview.html = this.getHtml(view.webview);
-    void this.discoverInventory(view.webview);
-    void this.discoverClaudeCode(view.webview);
-    void this.discoverCodex(view.webview);
+    this.initialDiscovery = Promise.allSettled([
+      this.discoverInventory(view.webview),
+      this.discoverClaudeCode(view.webview),
+      this.discoverCodex(view.webview),
+    ]).then(() => undefined);
 
     view.webview.onDidReceiveMessage(async (message: unknown) => {
       if (!isWebviewMessage(message)) {
@@ -118,6 +129,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
           if (this.activeExecution) {
             throw new Error("Cancelá la ejecución actual antes de analizar otra tarea.");
           }
+          await this.initialDiscovery;
           this.lastPrompt = undefined;
           this.lastDecision = undefined;
           this.lastExecutionSessionId = undefined;
@@ -126,7 +138,13 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
           if (!this.inventory) {
             throw new Error("El inventario de modelos todavía no está disponible. Revisá OpenCode e intentá de nuevo.");
           }
-          const decision = routePrompt(message.prompt, message.profile, this.inventory.models, Date.now());
+          const decision = routePrompt(
+            message.prompt,
+            message.profile,
+            this.routingCandidates(),
+            Date.now(),
+            this.usageSnapshots,
+          );
           this.lastPrompt = message.prompt.trim();
           this.lastDecision = decision;
           await view.webview.postMessage({ type: "decision", decision });
@@ -139,6 +157,11 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         return;
       }
 
+      if (message.type === "overrideCandidate") {
+        await this.applyCandidateOverride(view.webview, message);
+        return;
+      }
+
       if (message.type === "execute") {
         if (!this.lastPrompt || !this.lastDecision) {
           await view.webview.postMessage({
@@ -148,17 +171,30 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
           return;
         }
 
-        this.startExecution(view.webview, "opencode");
+        const reviewedDecision = decisionReviewSignature(this.lastDecision);
+        await this.refreshDecisionForCurrentPrompt(view.webview);
+        if (!this.lastDecision) return;
+        if (reviewedDecision !== decisionReviewSignature(this.lastDecision)) {
+          await view.webview.postMessage({ type: "routeNeedsReview" });
+          return;
+        }
+
+        const selectedRuntime = this.lastDecision.selected.runtimeId;
+        if (!isRuntimeId(selectedRuntime)) {
+          await view.webview.postMessage({ type: "executionError", message: "El runtime seleccionado no es compatible." });
+          return;
+        }
+        this.startExecution(view.webview, selectedRuntime);
         return;
       }
 
-      if (message.type === "executeClaude") {
-        this.startExecution(view.webview, "claude-code");
+      if (message.type === "selectClaude") {
+        await this.applyRuntimeOverride(view.webview, "claude-code");
         return;
       }
 
-      if (message.type === "executeCodex") {
-        this.startExecution(view.webview, "codex");
+      if (message.type === "selectCodex") {
+        await this.applyRuntimeOverride(view.webview, "codex");
       }
     });
   }
@@ -185,7 +221,9 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
     const executable = vscode.workspace.getConfiguration("cheprompt").get<string>("opencodePath", "opencode");
     const usageAdapter = adapter ?? new OpenCodeAdapter(executable);
     const snapshot = await usageAdapter.getUsageLimits();
+    this.rememberUsage(snapshot);
     await webview.postMessage({ type: "usage", snapshot });
+    await this.refreshDecisionForCurrentPrompt(webview);
   }
 
   private async discoverClaudeCode(webview: vscode.Webview): Promise<void> {
@@ -195,8 +233,13 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
     const inventory = await adapter.getInventory();
     this.claudeInventory = inventory;
     await webview.postMessage({ type: "claudeRuntime", inventory });
+    await this.refreshDecisionForCurrentPrompt(webview);
     const usage = await adapter.getUsageLimits?.();
-    if (usage) await webview.postMessage({ type: "claudeUsage", snapshot: usage });
+    if (usage) {
+      this.rememberUsage(usage);
+      await webview.postMessage({ type: "claudeUsage", snapshot: usage });
+      await this.refreshDecisionForCurrentPrompt(webview);
+    }
   }
 
   private async discoverCodex(webview: vscode.Webview): Promise<void> {
@@ -211,8 +254,181 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
     const inventory = await adapter.getInventory(subscriptionExpiry);
     this.codexInventory = inventory;
     await webview.postMessage({ type: "codexRuntime", inventory });
+    await this.refreshDecisionForCurrentPrompt(webview);
     const usage = await adapter.getUsageLimits();
+    this.rememberUsage(usage);
     await webview.postMessage({ type: "codexUsage", snapshot: usage });
+    await this.refreshDecisionForCurrentPrompt(webview);
+  }
+
+  private rememberUsage(snapshot: UsageSnapshot): void {
+    this.usageSnapshots = [
+      ...this.usageSnapshots.filter((item) => item.allowancePoolId !== snapshot.allowancePoolId),
+      snapshot,
+    ];
+  }
+
+  private async refreshDecisionForCurrentPrompt(webview: vscode.Webview): Promise<void> {
+    if (!this.lastPrompt || !this.lastDecision || this.activeExecution) return;
+
+    const previous = this.lastDecision;
+    const asOf = Date.now();
+    try {
+      const automatic = routePrompt(
+        this.lastPrompt,
+        previous.profile,
+        this.routingCandidates(),
+        asOf,
+        this.usageSnapshots,
+      );
+
+      if (!previous.manualOverride) {
+        this.lastDecision = automatic;
+      } else {
+        try {
+          const manual = routePrompt(
+            this.lastPrompt,
+            previous.profile,
+            [previous.selected],
+            asOf,
+            this.usageSnapshots,
+          );
+          const alternatives = [automatic.selected, ...automatic.alternatives]
+            .filter((model) => !sameCandidate(model, previous.selected))
+            .slice(0, 2);
+          const automaticRanked = [
+            { model: automatic.selected, score: automatic.selectedScore },
+            ...automatic.alternatives.map((model, index) => ({
+              model,
+              score: automatic.alternativeScores[index],
+            })),
+          ];
+          this.lastDecision = {
+            ...manual,
+            alternatives,
+            alternativeScores: alternatives.map((model) =>
+              automaticRanked.find((candidate) => sameCandidate(candidate.model, model))!.score,
+            ),
+            manualOverride: true,
+            reason: `Override manual elegido por vos. ${manual.reason}`,
+          };
+        } catch {
+          this.lastDecision = {
+            ...automatic,
+            reason: `El override dejó de estar disponible; se recalculó la ruta. ${automatic.reason}`,
+          };
+        }
+      }
+
+      await webview.postMessage({ type: "decision", decision: this.lastDecision });
+    } catch (error) {
+      this.lastDecision = undefined;
+      await webview.postMessage({
+        type: "error",
+        message: error instanceof Error ? error.message : "No quedan candidatos disponibles para esta tarea.",
+      });
+    }
+  }
+
+  private routingCandidates(): RuntimeModel[] {
+    const candidates: RuntimeModel[] = [];
+    if (this.inventory?.runtime.availability === "available") {
+      candidates.push(...this.inventory.models.filter((model) => model.providerId === "opencode-go"));
+    }
+    if (this.claudeInventory?.runtime.availability === "available") {
+      candidates.push(...this.claudeInventory.models);
+    }
+    if (this.codexInventory?.runtime.availability === "available") {
+      candidates.push(...this.codexInventory.models);
+    }
+    return candidates;
+  }
+
+  private async applyCandidateOverride(
+    webview: vscode.Webview,
+    choice: OverrideCandidateMessage,
+  ): Promise<void> {
+    if (!this.lastPrompt || !this.lastDecision || this.activeExecution) {
+      await webview.postMessage({ type: "error", message: "Analizá la tarea y detené cualquier ejecución antes del override." });
+      return;
+    }
+
+    const candidate = this.routingCandidates().find((model) =>
+      model.runtimeId === choice.runtimeId
+        && model.providerId === choice.providerId
+        && model.id === choice.id
+        && model.allowancePoolId === choice.allowancePoolId,
+    );
+    if (!candidate) {
+      await webview.postMessage({ type: "error", message: "El candidato de override ya no está en las alternativas vigentes." });
+      return;
+    }
+
+    await this.setManualCandidate(webview, candidate);
+  }
+
+  private async applyRuntimeOverride(
+    webview: vscode.Webview,
+    runtimeId: "claude-code" | "codex",
+  ): Promise<void> {
+    if (!this.lastPrompt || !this.lastDecision || this.activeExecution) {
+      await webview.postMessage({ type: "error", message: "Analizá la tarea y detené cualquier ejecución antes del override." });
+      return;
+    }
+    const candidate = this.routingCandidates().find((model) => model.runtimeId === runtimeId);
+    if (!candidate) {
+      await webview.postMessage({
+        type: "error",
+        message: runtimeId === "claude-code" ? "Claude Code no está disponible para este override." : "Codex no está disponible para este override.",
+      });
+      return;
+    }
+    await this.setManualCandidate(webview, candidate);
+  }
+
+  private async setManualCandidate(webview: vscode.Webview, candidate: RuntimeModel): Promise<void> {
+    if (!this.lastPrompt || !this.lastDecision) return;
+    const profile = this.lastDecision.profile;
+    const asOf = Date.now();
+    try {
+      const manual = routePrompt(
+        this.lastPrompt,
+        profile,
+        [candidate],
+        asOf,
+        this.usageSnapshots,
+      );
+      const automatic = routePrompt(
+        this.lastPrompt,
+        profile,
+        this.routingCandidates(),
+        asOf,
+        this.usageSnapshots,
+      );
+      const automaticRanked = [
+        { model: automatic.selected, score: automatic.selectedScore },
+        ...automatic.alternatives.map((model, index) => ({
+          model,
+          score: automatic.alternativeScores[index],
+        })),
+      ];
+      const alternatives = automaticRanked
+        .filter((entry) => !sameCandidate(entry.model, candidate))
+        .slice(0, 2);
+      this.lastDecision = {
+        ...manual,
+        alternatives: alternatives.map((entry) => entry.model),
+        alternativeScores: alternatives.map((entry) => entry.score),
+        manualOverride: true,
+        reason: `Override manual elegido por vos. ${manual.reason}`,
+      };
+      await webview.postMessage({ type: "decision", decision: this.lastDecision });
+    } catch (error) {
+      await webview.postMessage({
+        type: "error",
+        message: error instanceof Error ? error.message : "El candidato dejó de estar disponible.",
+      });
+    }
   }
 
   private openCodexLogin(webview: vscode.Webview): void {
@@ -279,7 +495,9 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
           ? this.claudeAdapter!.start(this.lastPrompt, cwd, onEvent)
           : this.codexAdapter!.start(
               this.lastPrompt,
-              { ...this.lastDecision, selected: this.codexInventory!.models[0] },
+              this.lastDecision.selected.runtimeId === "codex"
+                ? this.lastDecision
+                : { ...this.lastDecision, selected: this.codexInventory!.models[0] },
               cwd,
               onEvent,
             );
@@ -293,12 +511,14 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         if (runtime === "claude-code" && result.runtimeUnavailable && this.claudeAdapter) {
           this.claudeInventory = await this.claudeAdapter.getInventory();
           await webview.postMessage({ type: "claudeRuntime", inventory: this.claudeInventory });
+          await this.refreshDecisionForCurrentPrompt(webview);
         }
         if (runtime === "codex" && result.runtimeUnavailable && this.codexAdapter) {
           const expiry = vscode.workspace.getConfiguration("cheprompt")
             .get<string>("codex.chatgptSubscriptionExpiresAt", "2026-11-22T00:00:00.000Z");
           this.codexInventory = await this.codexAdapter.getInventory(expiry);
           await webview.postMessage({ type: "codexRuntime", inventory: this.codexInventory });
+          await this.refreshDecisionForCurrentPrompt(webview);
         }
       }).catch(async (error: unknown) => {
         if (this.activeExecution === execution) this.activeExecution = undefined;
@@ -462,7 +682,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
     <header>
       <span class="eyebrow">CHEPROMPT</span>
       <h1>El modelo justo para cada laburo.</h1>
-      <p>Analizá la decisión antes de consumir uso de OpenCode Go.</p>
+      <p>Una tarea, una ruta explicada y cupos oficiales cuando estén disponibles.</p>
     </header>
 
     <main>
@@ -503,10 +723,10 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
           <button id="refresh-claude" class="compact secondary" type="button">Actualizar estado</button>
         </div>
         <div id="claude-actions" class="hidden">
-          <button id="execute-claude" class="secondary" type="button" disabled>Ejecutar con Claude Pro</button>
+          <button id="execute-claude" class="secondary" type="button" disabled>Elegir Claude Pro</button>
           <button id="claude-interactive" class="secondary" type="button" disabled>Abrir Claude Code interactivo</button>
         </div>
-        <p class="hint">Esta opción usa la sesión oficial de Claude Code; no cambia el scoring de OpenCode.</p>
+        <p class="hint">El botón principal usa la ruta automática; esta acción es un override con la sesión oficial de Claude Code.</p>
       </section>
 
       <section id="codex-runtime" class="runtime-card" aria-live="polite">
@@ -518,10 +738,10 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
           <button id="refresh-codex" class="compact secondary" type="button">Actualizar estado</button>
         </div>
         <div id="codex-actions" class="hidden">
-          <button id="execute-codex" class="secondary" type="button" disabled>Ejecutar con Codex</button>
+          <button id="execute-codex" class="secondary" type="button" disabled>Elegir Codex</button>
           <button id="codex-interactive" class="secondary" type="button" disabled>Abrir Codex interactivo</button>
         </div>
-        <p class="hint">Una API key usa facturación separada. Esta opción es explícita; el routing automático entre runtimes llega en M4.</p>
+        <p class="hint">El botón principal usa la ruta automática. Esta es un override; una API key usa facturación separada.</p>
       </section>
 
       <section id="decision" class="decision hidden" aria-live="polite">
@@ -530,17 +750,29 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
           <span id="confidence" class="confidence"></span>
         </div>
         <h2 id="model"></h2>
+        <p id="route-runtime" class="mono"></p>
         <p id="model-id" class="mono"></p>
         <p id="reason"></p>
         <dl>
           <div><dt>Impacto de uso</dt><dd id="impact"></dd></div>
-          <div><dt>Precio de OpenCode</dt><dd id="pricing"></dd></div>
+          <div><dt>Cupo de ejecución</dt><dd id="allowance"></dd></div>
+          <div><dt>Puntaje</dt><dd id="total-score"></dd></div>
         </dl>
+        <details>
+          <summary>Componentes del puntaje</summary>
+          <ul id="score-components"></ul>
+        </details>
         <details>
           <summary>Alternativas consideradas</summary>
           <ul id="alternatives"></ul>
         </details>
-        <button id="execute" class="run">Ejecutar en ChePrompt</button>
+        <details>
+          <summary>Override manual</summary>
+          <label for="override-candidate">Ejecutar con otro candidato</label>
+          <select id="override-candidate"></select>
+          <button id="apply-override" class="compact secondary" type="button">Aplicar override</button>
+        </details>
+        <button id="execute" class="run">Ejecutar ruta elegida</button>
         <button id="interactive-fallback" class="secondary" type="button">Abrir terminal interactiva</button>
         <p class="hint">Usá la terminal si OpenCode necesita una aprobación interactiva.</p>
       </section>
@@ -553,7 +785,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
       </section>
     </main>
 
-    <footer>Routing inicial basado en reglas. Medir antes de automatizar más.</footer>
+    <footer>Scoring local con hipótesis iniciales; medir antes de recalibrar.</footer>
     <script nonce="${nonce}" src="${scriptUri}"></script>
   </body>
 </html>`;
@@ -570,14 +802,21 @@ type ExecuteMessage = { type: "execute" };
 type RefreshUsageMessage = { type: "refreshUsage" };
 type CancelExecutionMessage = { type: "cancelExecution" };
 type InteractiveFallbackMessage = { type: "interactiveFallback" };
-type ExecuteClaudeMessage = { type: "executeClaude" };
+type SelectClaudeMessage = { type: "selectClaude" };
 type ClaudeInteractiveMessage = { type: "claudeInteractive" };
 type RefreshClaudeMessage = { type: "refreshClaude" };
 type ClaudeLoginMessage = { type: "claudeLogin" };
-type ExecuteCodexMessage = { type: "executeCodex" };
+type SelectCodexMessage = { type: "selectCodex" };
 type CodexInteractiveMessage = { type: "codexInteractive" };
 type RefreshCodexMessage = { type: "refreshCodex" };
 type CodexLoginMessage = { type: "codexLogin" };
+type OverrideCandidateMessage = {
+  type: "overrideCandidate";
+  runtimeId: string;
+  providerId: string;
+  id: string;
+  allowancePoolId: string;
+};
 
 function isWebviewMessage(value: unknown): value is
   | AnalyzeMessage
@@ -585,29 +824,39 @@ function isWebviewMessage(value: unknown): value is
   | RefreshUsageMessage
   | CancelExecutionMessage
   | InteractiveFallbackMessage
-  | ExecuteClaudeMessage
+  | SelectClaudeMessage
   | ClaudeInteractiveMessage
   | RefreshClaudeMessage
   | ClaudeLoginMessage
-  | ExecuteCodexMessage
+  | SelectCodexMessage
   | CodexInteractiveMessage
   | RefreshCodexMessage
-  | CodexLoginMessage {
+  | CodexLoginMessage
+  | OverrideCandidateMessage {
   if (!value || typeof value !== "object" || !("type" in value)) {
     return false;
   }
 
   const candidate = value as Record<string, unknown>;
+  if (
+    candidate.type === "overrideCandidate" &&
+    typeof candidate.runtimeId === "string" &&
+    typeof candidate.providerId === "string" &&
+    typeof candidate.id === "string" &&
+    typeof candidate.allowancePoolId === "string"
+  ) {
+    return true;
+  }
   if ([
     "execute",
     "refreshUsage",
     "cancelExecution",
     "interactiveFallback",
-    "executeClaude",
+    "selectClaude",
     "claudeInteractive",
     "refreshClaude",
     "claudeLogin",
-    "executeCodex",
+    "selectCodex",
     "codexInteractive",
     "refreshCodex",
     "codexLogin",
@@ -620,6 +869,37 @@ function isWebviewMessage(value: unknown): value is
     typeof candidate.prompt === "string" &&
     ["economy", "balanced", "quality"].includes(String(candidate.profile))
   );
+}
+
+function isRuntimeId(value: string): value is "opencode" | "claude-code" | "codex" {
+  return ["opencode", "claude-code", "codex"].includes(value);
+}
+
+function sameCandidate(left: RuntimeModel, right: RuntimeModel): boolean {
+  return left.runtimeId === right.runtimeId
+    && left.providerId === right.providerId
+    && left.id === right.id
+    && left.allowancePoolId === right.allowancePoolId;
+}
+
+function decisionReviewSignature(decision: RoutingDecision): string {
+  const candidateKey = (model: RuntimeModel) => [
+    model.runtimeId,
+    model.providerId,
+    model.id,
+    model.allowancePoolId,
+  ].join("/");
+  return JSON.stringify({
+    selected: candidateKey(decision.selected),
+    alternatives: decision.alternatives.map(candidateKey),
+    score: decision.selectedScore.total.toFixed(1),
+    alternativeScores: decision.alternativeScores.map((score) => score.total.toFixed(1)),
+    allowancePoolId: decision.allowancePoolId,
+    remainingPercent: decision.remainingPercent ?? null,
+    allowanceSource: decision.allowanceSource ?? null,
+    allowanceObservedAt: decision.allowanceObservedAt ?? null,
+    manualOverride: decision.manualOverride ?? false,
+  });
 }
 
 function createNonce(): string {

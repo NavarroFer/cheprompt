@@ -81,8 +81,26 @@ const decision: RoutingDecision = {
     label: "Codex configured default",
     usageImpact: "medium",
     strengths: [],
+    runtimeId: "codex",
+    providerId: "chatgpt-codex",
+    allowancePoolId: "chatgpt-codex",
+    availability: "available",
+    capabilities: ["text", "tools", "reasoning"],
+    capabilitiesKnown: true,
   },
   alternatives: [],
+  selectedScore: {
+    taskFit: 100,
+    usagePressure: 65,
+    contextFit: null,
+    capabilityFit: 100,
+    availability: 100,
+    expiration: 100,
+    allowance: null,
+    total: 100,
+  },
+  alternativeScores: [],
+  allowancePoolId: "chatgpt-codex",
   matchedSignals: [],
   reason: "test",
   confidence: 0.8,
@@ -102,8 +120,20 @@ test("discovers Codex CLI and ChatGPT auth status without reading credentials", 
   assert.equal(inventory.runtime.availability, "available");
   assert.equal(inventory.providers[0].id, "chatgpt-codex");
   assert.equal(inventory.models[0].id, "codex-default");
+  assert.equal(inventory.models[0].capabilitiesKnown, false);
   assert.equal(inventory.models[0].expiresAt, CODEX_CHATGPT_EXPIRES_AT);
   assert.equal(JSON.stringify(inventory).includes("token"), false);
+});
+
+test("recognizes ChatGPT login status when Codex CLI writes it to stderr", async () => {
+  const process = new FakeProcessExecutor([
+    success("codex 0.165.0"),
+    { stdout: "", stderr: "Logged in using ChatGPT", exitCode: 0 },
+  ]);
+  const inventory = await new CodexAdapter("fake-codex", process).getInventory();
+
+  assert.equal(inventory.runtime.availability, "available");
+  assert.equal(inventory.runtime.message?.startsWith("Autenticado con ChatGPT"), true);
 });
 
 test("recognizes API-key auth but does not apply the ChatGPT subscription expiration", async () => {

@@ -13,10 +13,12 @@ import {
   RuntimeExecutionResult,
   UsageSnapshot,
   UsageWindow,
+  USAGE_SNAPSHOT_MAX_AGE_MS,
 } from "./types";
 
+export { USAGE_SNAPSHOT_MAX_AGE_MS } from "./types";
+
 export const USAGE_LIMITS_ENDPOINT = "/api/experimental/usage/limits";
-export const USAGE_SNAPSHOT_MAX_AGE_MS = 5 * 60 * 1000;
 const USAGE_SOURCE = `OpenCode API ${USAGE_LIMITS_ENDPOINT}`;
 const USAGE_WINDOWS: readonly UsageWindow[] = ["rolling", "weekly", "monthly"];
 
@@ -329,6 +331,7 @@ export function parseOpenCodeUsageLimits(
   const base = {
     runtimeId: OPENCODE_RUNTIME.id,
     provider: "OpenCode Go",
+    allowancePoolId: "opencode-go",
     source: USAGE_SOURCE,
     observedAt,
   };
@@ -378,6 +381,7 @@ export function parseOpenCodeUsageLimits(
       // The official schema documents percent as allowance already used.
       remainingPercent: 100 - meter.percent,
       resetsAt: meter.resetsAt,
+      limited: meter.limited,
     });
   }
 
@@ -395,6 +399,7 @@ function unknownUsageSnapshot(observedAt: number): UsageSnapshot {
   return {
     runtimeId: OPENCODE_RUNTIME.id,
     provider: "OpenCode Go",
+    allowancePoolId: "opencode-go",
     status: "unknown",
     windows: [],
     source: USAGE_SOURCE,
@@ -429,8 +434,10 @@ function toRuntimeModel(id: string): RuntimeModel {
     strengths: known?.strengths ?? ["modelo descubierto en OpenCode"],
     runtimeId: OPENCODE_RUNTIME.id,
     providerId,
+    allowancePoolId: providerId,
     availability: "available",
     capabilities: known ? ["text", "tools"] : ["text"],
+    capabilitiesKnown: !!known,
   };
 }
 

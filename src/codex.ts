@@ -44,8 +44,10 @@ const CODEX_MODEL: RuntimeModel = {
   strengths: ["modelo predeterminado configurado en Codex"],
   runtimeId: CODEX_RUNTIME_ID,
   providerId: CODEX_PROVIDER_ID,
+  allowancePoolId: CODEX_PROVIDER_ID,
   availability: "available",
   capabilities: ["text", "tools", "reasoning"],
+  capabilitiesKnown: false,
 };
 
 const CODEX_RUNTIME: RuntimeDescriptor = {
@@ -70,6 +72,7 @@ const CODEX_PROVIDER: ProviderDescriptor = {
  */
 export class CodexAdapter implements RuntimeAdapter {
   private unavailableUntil = 0;
+  private lastAuthentication: CodexAuthentication = "unknown";
 
   constructor(
     private readonly executable = "codex",
@@ -86,7 +89,9 @@ export class CodexAdapter implements RuntimeAdapter {
       }
 
       const login = await this.processExecutor.run(this.executable, ["login", "status"], { env: environment });
-      const authentication = parseCodexAuthentication(login.stdout, login.exitCode);
+      // Codex CLI 0.165.0 writes the successful status line to stderr.
+      const authentication = parseCodexAuthentication(`${login.stdout}\n${login.stderr}`, login.exitCode);
+      this.lastAuthentication = authentication;
       const now = Date.now();
       const subscriptionExpiry = authentication === "chatgpt" ? subscriptionExpiresAt : undefined;
       const parsedExpiry = subscriptionExpiry ? Date.parse(subscriptionExpiry) : undefined;
@@ -101,6 +106,7 @@ export class CodexAdapter implements RuntimeAdapter {
       const model: RuntimeModel = {
         ...CODEX_MODEL,
         providerId: authentication === "api-key" ? OPENAI_API_PROVIDER_ID : CODEX_PROVIDER_ID,
+        allowancePoolId: authentication === "api-key" ? OPENAI_API_PROVIDER_ID : CODEX_PROVIDER_ID,
         availability,
         ...(subscriptionExpiry ? { expiresAt: subscriptionExpiry } : {}),
       };
@@ -168,6 +174,7 @@ export class CodexAdapter implements RuntimeAdapter {
     return {
       runtimeId: CODEX_RUNTIME_ID,
       provider: "OpenAI Codex",
+      allowancePoolId: this.lastAuthentication === "api-key" ? OPENAI_API_PROVIDER_ID : CODEX_PROVIDER_ID,
       status: "not-available",
       windows: [],
       source: CODEX_USAGE_SOURCE,

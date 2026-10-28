@@ -22,9 +22,9 @@ The router optimizes expected successful completion, not the cheapest first call
 
 - **Completed:** M0 foundation.
 - **Completed:** M1 runtime inventory and stable contracts.
-- **Now:** M3.5 implementation integrated; Codex sign-in and F5 validation pending, along with the previously pending M1.5/M2/M3 UI checks.
-- **Next:** Validate M1.5/M2/M3/M3.5 together in the Extension Development Host; only then begin M4 adaptive routing and M4.5 terminal-inspired UI.
-- **Later:** Claude Code, ChatGPT/Codex, adaptive routing, evaluation-driven learning, automatic fallback and parallel agents.
+- **Now:** M4 adaptive routing implementation complete; Extension Development Host validation pending.
+- **Next:** Validate M4's automatic cross-runtime route, review and override in the Extension Development Host; then begin M4.5 terminal-inspired UI.
+- **Later:** Evaluation-driven learning, automatic fallback and parallel agents.
 
 ## Now
 
@@ -66,7 +66,7 @@ Dependencies:
 
 ### M1.5 — Provider-reported usage visibility
 
-**Status:** Implemented; manual F5 validation pending (2026-10-27)
+**Status:** Validated by user in Extension Development Host (2026-10-28)
 
 Outcome: ChePrompt shows the exact remaining allowance and reset windows when an official provider surface exposes them, without presenting guesses as account data.
 
@@ -85,7 +85,7 @@ Definition of done:
 
 Result: OpenCode's official schema defines each meter's raw `percent` as the portion already used, so ChePrompt displays `100 - percent` as remaining. The UI refreshes through the official `opencode api` client and hides data once older than five minutes. No live account was queried during tests.
 
-Limitations: the endpoint is experimental and its errors/changed schemas display as unknown. UI validation in Extension Development Host remains to be done manually; no usage data is stored and routing scores are unchanged. M1.5's F5 check is still outstanding; the user explicitly authorized starting M2 before that check. Validate both flows together before closing either milestone.
+Limitations: the endpoint is experimental and its errors/changed schemas display as unknown. No usage data is stored; fresh official usage now participates in M4 routing, while stale/unknown usage remains unknown.
 
 Dependencies:
 
@@ -96,7 +96,7 @@ Dependencies:
 
 ### M2 — Unified execution inside ChePrompt
 
-**Status:** Implemented; manual F5 validation pending (2026-10-28)
+**Status:** Validated by user in Extension Development Host (2026-10-28)
 
 Outcome: prompts, streaming output, cancellation and errors remain in the ChePrompt panel instead of opening an unmanaged terminal.
 
@@ -110,30 +110,30 @@ Definition of done:
 
 Result: OpenCode runs with `--format json` and no `--auto`; text/tool/step/error events stream into the panel. The user can cancel or open the same session in an interactive TUI when approval is needed. Process creation, cancellation, session capture, permission fallback and malformed JSONL are covered with fake processes.
 
-Limitations: `opencode run` is non-interactive and rejects permission requests; ChePrompt surfaces the request and lets the user cancel and attach the session in the interactive TUI. Visual F5 validation is pending, along with M1.5's pending usage-panel check. Do not begin M3 until both are exercised.
+Limitations: `opencode run` is non-interactive and rejects permission requests; ChePrompt surfaces the request and lets the user cancel and attach the session in the interactive TUI. The user later confirmed the integrated M1.5/M2/M3/M3.5 flows in Extension Development Host.
 
 ### M3 — Claude Pro through Claude Code
 
-**Status:** Implementation complete; Claude Pro sign-in and F5 validation pending (2026-10-28)
+**Status:** Validated by user in Extension Development Host (2026-10-28)
 
 Outcome: ChePrompt can select Claude Pro by invoking the official Claude Code CLI directly.
 
 Definition of done:
 
-- [x] Install the official Claude Code CLI (native version 2.1.312); authenticate with the user's Claude Pro account remains pending user action.
+- [x] Install the official Claude Code CLI (native version 2.1.312) and authenticate with the user's Claude Pro account.
 - [x] Implement `ClaudeCodeAdapter` without copying Claude credentials into ChePrompt.
 - [x] Detect quota/auth failures and mark the runtime temporarily unavailable.
 - [x] Stream execution through the same M2 event contract.
 - [x] Show `Not available` because the official CLI/docs reviewed do not expose an exact remaining subscription percentage.
 - [x] Document that Claude Pro credentials must not be reused through OpenCode plugins.
 
-Result: Claude Code is exposed as an explicit runtime choice after route review. The adapter checks the official CLI auth status, accepts only Claude subscription OAuth methods, filters API-key and third-party provider environment overrides, and streams `stream-json` events without automatic permission bypass. Auth/quota failures cool the runtime down for one minute.
+Result: Claude Code is exposed as an explicit runtime choice after route review. The adapter checks the official CLI auth status, accepts only Claude subscription OAuth methods, filters API-key and third-party provider environment overrides, and streams `stream-json` events without automatic permission bypass. Auth/quota failures cool the runtime down for one minute. The user confirmed successful Claude Pro sign-in and a live execution smoke test on 2026-10-28.
 
-Limitations: no Claude Pro login or live execution was initiated. The user must complete the official login from the panel and test the M1.5/M2/M3/M3.5 flows in Extension Development Host. M4 remains blocked on final user validation.
+Limitations: exact Claude subscription usage remains unavailable. The user confirmed Claude execution during the combined M1.5/M2/M3/M3.5 validation; the new M4 automatic route still needs its own F5 check.
 
 ### M3.5 — ChatGPT/Codex runtime
 
-**Status:** Implementation integrated; Codex sign-in and manual F5 validation pending (2026-10-28)
+**Status:** Validated by user in Extension Development Host (2026-10-28)
 
 Outcome: ChePrompt can select the user's officially authenticated OpenAI coding runtime without copying account credentials.
 
@@ -144,32 +144,37 @@ Definition of done:
 - [x] Detect authentication and quota failures without reading or exposing raw credentials.
 - [x] Include exact remaining usage only if the official integration exposes it; otherwise show `Not available`.
 - [x] Exclude the runtime after 2026-11-21 unless the subscription is renewed or a separate eligible OpenAI account is configured.
-- [ ] Sign in with the official Codex CLI and validate M1.5/M2/M3/M3.5 together in Extension Development Host.
+- [x] Sign in through the official Codex CLI with ChatGPT; user confirmed successful sign-in.
+- [x] Validate Codex execution and M1.5/M2/M3/M3.5 together in Extension Development Host; user confirmed the integrated flow.
 
 Result: ChePrompt uses the official [Codex CLI authentication status](https://developers.openai.com/codex/auth) and `codex exec --json` with `--sandbox workspace-write --ask-for-approval on-request`, following OpenAI's [non-interactive mode](https://developers.openai.com/codex/non-interactive-mode). Credentials remain in Codex's official store; API-key environment overrides are removed consistently during discovery and execution. ChatGPT subscription and API-key usage are represented as separate allowance pools. Authentication and quota failures temporarily disable the runtime, and no raw process diagnostics or credentials are shown.
 
-Limitations: Codex's documented [`/usage` command](https://developers.openai.com/codex/developer-commands#view-account-usage-with-usage) reports token activity, not an exact remaining subscription percentage, so ChePrompt shows `Not available`. The ChatGPT subscription expiry defaults to 2026-11-22 UTC (the user's reported final subscription day is 2026-11-21); update `cheprompt.codex.chatgptSubscriptionExpiresAt` if renewed. Automated tests use fake processes only. The user must sign in through the official Codex CLI and validate the M1.5/M2/M3/M3.5 flows together in Extension Development Host before M3.5 is considered fully validated or M4 begins.
+Limitations: Codex's documented [`/usage` command](https://developers.openai.com/codex/developer-commands#view-account-usage-with-usage) reports token activity, not an exact remaining subscription percentage, so ChePrompt shows `Not available`. The ChatGPT subscription expiry defaults to 2026-11-22 UTC (the user's reported final subscription day is 2026-11-21); update `cheprompt.codex.chatgptSubscriptionExpiresAt` if renewed. Codex CLI 0.165.0 writes its successful `codex login status` line to stderr; the adapter inspects both stdout and stderr. The user confirmed Codex execution in the integrated M1.5/M2/M3/M3.5 Extension Development Host test.
 
 ### M4 — Adaptive transparent router
 
-**Status:** Blocked on M1.5/M2/M3/M3.5 Extension Development Host validation
+**Status:** Implementation complete; M4-specific Extension Development Host validation pending (2026-10-28)
 
 Outcome: one ChePrompt submission is routed across OpenCode Go, Claude Code and ChatGPT/Codex according to task fit, expected usage, context needs, capabilities, availability and expiration.
 
 Definition of done:
 
-- [ ] Replace the three-model hardcoded decision with scoring over discovered candidates.
-- [ ] Score across runtime boundaries: OpenCode Go, Claude Code and ChatGPT/Codex must compete in one candidate set.
-- [ ] Include discovered OpenCode Go models such as `opencode-go/deepseek-v4.1-flash`, `opencode-go/deepseek-v4-pro` and eligible GPT models instead of limiting the catalog to Luna, Argon and Kimi.
-- [ ] Treat each runtime/provider allowance pool independently even when two candidates belong to the same model family.
-- [ ] Keep provider selection automatic in the default flow: the user submits one prompt and receives one routed execution in ChePrompt.
-- [ ] Keep routing local and deterministic by default so selection itself spends no tokens.
-- [ ] Show score components, selected runtime/model and two alternatives.
-- [ ] Support `economy`, `balanced` and `quality` policies.
-- [ ] Model the ChatGPT subscription as unavailable after 2026-11-21 unless renewed.
-- [ ] Allow a manual override without changing the default automatic flow.
-- [ ] Use fresh provider-reported remaining allowance as a routing constraint when available.
-- [ ] Never compare an unknown or locally inferred percentage as if it were an official quota value.
+- [x] Replace the three-model hardcoded decision with scoring over discovered candidates.
+- [x] Score across runtime boundaries: OpenCode Go, Claude Code and ChatGPT/Codex compete in one candidate set.
+- [x] Include discovered OpenCode Go models such as `opencode-go/deepseek-v4.1-flash`, `opencode-go/deepseek-v4-pro` and eligible GPT models instead of limiting the catalog to Luna, Argon and Kimi.
+- [x] Treat each runtime/provider allowance pool independently even when two candidates belong to the same model family.
+- [x] Keep provider selection automatic in the default flow: the user submits one prompt and receives one routed execution in ChePrompt.
+- [x] Keep routing local and deterministic by default so selection itself spends no tokens.
+- [x] Show score components, selected runtime/model and up to two eligible alternatives.
+- [x] Support `economy`, `balanced` and `quality` policies.
+- [x] Model the ChatGPT subscription as unavailable after 2026-11-21 unless renewed.
+- [x] Allow a manual override without changing the default automatic flow; the decision is recomputed and reviewed before execution.
+- [x] Use fresh provider-reported remaining allowance as a routing constraint when available.
+- [x] Never compare an unknown or locally inferred percentage as if it were an official quota value.
+
+Result: `routePrompt` now scores only discovered, eligible candidates across OpenCode Go, Claude Code and Codex. It returns a deterministic score breakdown, selected allowance pool, fresh official allowance details when available, confidence and ranked alternatives. Extension discovery completes before analysis; refreshing inventory or usage re-evaluates the pending route without executing it. Manual override updates the displayed decision and still requires explicit execution approval. The Codex subscription and API-key pools remain distinct.
+
+Limitations: scoring weights and task-signal heuristics are initial hypotheses, not evaluated quality claims; M5 will measure outcomes before recalibration. Claude/Codex context and exact usage remain unknown when their official surfaces do not report them. The user should validate the new automatic cross-runtime selection, score display, manual override/review, runtime execution and refreshed-allowance rerouting with F5 before M4 is marked fully validated.
 
 ### M4.5 — Terminal-inspired fluorescent UI
 

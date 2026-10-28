@@ -98,9 +98,9 @@ test("reads all official Go usage windows and normalizes used percent to remaini
   assert.equal(snapshot.provider, "OpenCode Go");
   assert.equal(snapshot.source, `OpenCode API ${USAGE_LIMITS_ENDPOINT}`);
   assert.deepEqual(snapshot.windows, [
-    { window: "rolling", remainingPercent: 77, resetsAt: 1_800_000_000_000 },
-    { window: "weekly", remainingPercent: 25, resetsAt: 1_800_100_000_000 },
-    { window: "monthly", remainingPercent: 0, resetsAt: 1_800_200_000_000 },
+    { window: "rolling", remainingPercent: 77, resetsAt: 1_800_000_000_000, limited: false },
+    { window: "weekly", remainingPercent: 25, resetsAt: 1_800_100_000_000, limited: false },
+    { window: "monthly", remainingPercent: 0, resetsAt: 1_800_200_000_000, limited: true },
   ]);
   assert.equal(snapshot.freshness, "fresh");
 });

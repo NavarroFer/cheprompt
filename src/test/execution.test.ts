@@ -56,6 +56,18 @@ const decision: RoutingDecision = {
   reason: "test",
   confidence: 0.8,
   pricing: "test",
+  selectedScore: {
+    taskFit: 100,
+    usagePressure: 100,
+    contextFit: null,
+    capabilityFit: 100,
+    availability: 100,
+    expiration: 100,
+    allowance: null,
+    total: 100,
+  },
+  alternativeScores: [],
+  allowancePoolId: "opencode-go",
 };
 
 test("streams JSON events incrementally and captures the OpenCode session", async () => {

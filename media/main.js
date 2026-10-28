@@ -10,6 +10,8 @@ const executionStatus = document.getElementById("execution-status");
 const executionOutput = document.getElementById("execution-output");
 const cancelExecutionButton = document.getElementById("cancel-execution");
 const decisionPanel = document.getElementById("decision");
+const overrideCandidateSelect = document.getElementById("override-candidate");
+const applyOverrideButton = document.getElementById("apply-override");
 const status = document.getElementById("status");
 const inventoryStatus = document.getElementById("inventory-status");
 const inventoryModels = document.getElementById("inventory-models");
@@ -36,11 +38,13 @@ let claudeInstalled = false;
 let codexAvailable = false;
 let codexInstalled = false;
 let currentExecutionRuntime = "opencode";
+let latestDecision;
 
 profileInput.value = document.body.dataset.defaultProfile || "balanced";
 
 analyzeButton.addEventListener("click", () => {
   status.textContent = "Analizando complejidad, costo relativo y capacidad…";
+  latestDecision = undefined;
   decisionPanel.classList.add("hidden");
   claudeActions.classList.add("hidden");
   codexActions.classList.add("hidden");
@@ -54,7 +58,10 @@ analyzeButton.addEventListener("click", () => {
 });
 
 executeButton.addEventListener("click", () => {
-  currentExecutionRuntime = "opencode";
+  currentExecutionRuntime = latestDecision?.selected.runtimeId || "opencode";
+  const runtimeName = currentExecutionRuntime === "claude-code"
+    ? "Claude Code"
+    : currentExecutionRuntime === "codex" ? "Codex" : "OpenCode";
   executeButton.disabled = true;
   executeClaudeButton.disabled = true;
   executeCodexButton.disabled = true;
@@ -63,24 +70,15 @@ executeButton.addEventListener("click", () => {
   executionPanel.classList.remove("hidden");
   analyzeButton.disabled = true;
   executionOutput.replaceChildren();
-  executionStatus.textContent = "Iniciando OpenCode…";
+  executionStatus.textContent = `Iniciando ${runtimeName}…`;
   cancelExecutionButton.disabled = false;
   vscode.postMessage({ type: "execute" });
 });
 
 executeClaudeButton.addEventListener("click", () => {
-  currentExecutionRuntime = "claude-code";
-  executeButton.disabled = true;
   executeClaudeButton.disabled = true;
-  executeCodexButton.disabled = true;
-  interactiveFallbackButton.disabled = true;
-  codexInteractiveButton.disabled = true;
-  executionPanel.classList.remove("hidden");
-  analyzeButton.disabled = true;
-  executionOutput.replaceChildren();
-  executionStatus.textContent = "Iniciando Claude Code con tu sesión oficial…";
-  cancelExecutionButton.disabled = false;
-  vscode.postMessage({ type: "executeClaude" });
+  status.textContent = "Aplicando Claude Pro como override; revisá la ruta antes de ejecutar.";
+  vscode.postMessage({ type: "selectClaude" });
 });
 
 claudeInteractiveButton.addEventListener("click", () => {
@@ -95,19 +93,9 @@ claudeInteractiveButton.addEventListener("click", () => {
 });
 
 executeCodexButton.addEventListener("click", () => {
-  currentExecutionRuntime = "codex";
-  executeButton.disabled = true;
-  executeClaudeButton.disabled = true;
   executeCodexButton.disabled = true;
-  interactiveFallbackButton.disabled = true;
-  claudeInteractiveButton.disabled = true;
-  codexInteractiveButton.disabled = true;
-  executionPanel.classList.remove("hidden");
-  analyzeButton.disabled = true;
-  executionOutput.replaceChildren();
-  executionStatus.textContent = "Iniciando Codex con la autenticación oficial…";
-  cancelExecutionButton.disabled = false;
-  vscode.postMessage({ type: "executeCodex" });
+  status.textContent = "Aplicando Codex como override; revisá la ruta antes de ejecutar.";
+  vscode.postMessage({ type: "selectCodex" });
 });
 
 codexInteractiveButton.addEventListener("click", () => {
@@ -161,6 +149,13 @@ refreshUsageButton.addEventListener("click", () => {
   refreshUsageButton.disabled = true;
   usageStatus.textContent = "Actualizando límites oficiales…";
   vscode.postMessage({ type: "refreshUsage" });
+});
+
+applyOverrideButton.addEventListener("click", () => {
+  const candidate = JSON.parse(overrideCandidateSelect.value);
+  applyOverrideButton.disabled = true;
+  status.textContent = "Aplicando override y recalculando el candidato…";
+  vscode.postMessage({ type: "overrideCandidate", ...candidate });
 });
 
 window.addEventListener("message", ({ data }) => {
@@ -254,6 +249,20 @@ window.addEventListener("message", ({ data }) => {
     return;
   }
 
+  if (data.type === "routeNeedsReview") {
+    executionPanel.classList.add("hidden");
+    analyzeButton.disabled = false;
+    executeButton.disabled = false;
+    executeClaudeButton.disabled = !claudeAvailable;
+    claudeInteractiveButton.disabled = !claudeAvailable;
+    executeCodexButton.disabled = !codexAvailable;
+    codexInteractiveButton.disabled = !codexAvailable;
+    cancelExecutionButton.disabled = true;
+    interactiveFallbackButton.disabled = latestDecision?.selected.runtimeId !== "opencode";
+    status.textContent = "El cupo o la ruta cambiaron. Revisá la nueva decisión antes de ejecutar.";
+    return;
+  }
+
   if (data.type === "executionResult") {
     const result = data.result;
     const runtimeName = data.runtimeId === "claude-code"
@@ -343,7 +352,10 @@ window.addEventListener("message", ({ data }) => {
 
   if (data.type === "error") {
     status.textContent = data.message;
-    executeButton.disabled = false;
+    applyOverrideButton.disabled = !latestDecision;
+    executeClaudeButton.disabled = !latestDecision || !claudeAvailable;
+    executeCodexButton.disabled = !latestDecision || !codexAvailable;
+    executeButton.disabled = !latestDecision;
     return;
   }
 
@@ -358,26 +370,74 @@ window.addEventListener("message", ({ data }) => {
   }
 
   const decision = data.decision;
+  latestDecision = decision;
   document.getElementById("complexity").textContent = decision.complexity;
   document.getElementById("confidence").textContent = `${Math.round(decision.confidence * 100)}% de confianza`;
   document.getElementById("model").textContent = decision.selected.label;
+  document.getElementById("route-runtime").textContent = `${decision.selected.runtimeId} · proveedor ${decision.selected.providerId}`;
   document.getElementById("model-id").textContent = decision.selected.id;
   document.getElementById("reason").textContent = decision.reason;
   document.getElementById("impact").textContent = decision.selected.usageImpact;
-  document.getElementById("pricing").textContent = decision.pricing;
-
-  const alternatives = document.getElementById("alternatives");
-  alternatives.replaceChildren(
-    ...decision.alternatives.map((model) => {
+  const allowance = document.getElementById("allowance");
+  const allowanceValue = decision.remainingPercent === undefined
+    ? "Not available"
+    : `${decision.remainingPercent}% restante`;
+  const allowanceSource = decision.allowanceSource
+    ? ` · ${decision.allowanceSource}${decision.allowanceObservedAt === undefined ? "" : ` · consultado ${formatUsageTime(decision.allowanceObservedAt)}`}`
+    : "";
+  allowance.textContent = `${decision.allowancePoolId} · ${allowanceValue}${allowanceSource}`;
+  document.getElementById("total-score").textContent = `${decision.selectedScore.total.toFixed(0)}/100`;
+  const scoreLabels = {
+    taskFit: "Ajuste a la tarea",
+    usagePressure: "Impacto relativo",
+    contextFit: "Contexto",
+    capabilityFit: "Capacidades",
+    availability: "Disponibilidad",
+    expiration: "Vigencia",
+    allowance: "Cupo oficial",
+  };
+  document.getElementById("score-components").replaceChildren(
+    ...Object.entries(scoreLabels).map(([key, label]) => {
       const item = document.createElement("li");
-      item.textContent = `${model.label} · impacto ${model.usageImpact}`;
+      const value = decision.selectedScore[key];
+      item.textContent = `${label}: ${value === null ? "Not available" : `${Math.round(value)}/100`}`;
       return item;
     }),
   );
 
-  status.textContent = "Ruta lista. Revisala antes de ejecutar.";
+  const alternatives = document.getElementById("alternatives");
+  alternatives.replaceChildren(
+    ...decision.alternatives.map((model, index) => {
+      const item = document.createElement("li");
+      item.textContent = `${model.label} · ${model.runtimeId}/${model.providerId} · ${decision.alternativeScores[index].total.toFixed(0)}/100 · cupo ${model.allowancePoolId}`;
+      return item;
+    }),
+  );
+
+  const overrideCandidates = [decision.selected, ...decision.alternatives];
+  const overrideOptions = overrideCandidates.map((model) => {
+    const option = document.createElement("option");
+    option.value = JSON.stringify({
+      runtimeId: model.runtimeId,
+      providerId: model.providerId,
+      id: model.id,
+      allowancePoolId: model.allowancePoolId,
+    });
+    option.textContent = `${model.label} · ${model.runtimeId}/${model.providerId} · pool ${model.allowancePoolId}`;
+    option.selected = model.id === decision.selected.id
+      && model.runtimeId === decision.selected.runtimeId
+      && model.providerId === decision.selected.providerId
+      && model.allowancePoolId === decision.selected.allowancePoolId;
+    return option;
+  });
+  overrideCandidateSelect.replaceChildren(...overrideOptions);
+  applyOverrideButton.disabled = false;
+
+  status.textContent = decision.manualOverride
+    ? "Override aplicado. Revisá el nuevo runtime, cupo y puntaje antes de ejecutar."
+    : "Ruta automática lista. Revisala antes de ejecutar.";
   executeButton.disabled = false;
-  interactiveFallbackButton.disabled = false;
+  interactiveFallbackButton.disabled = decision.selected.runtimeId !== "opencode";
   claudeActions.classList.remove("hidden");
   executeClaudeButton.disabled = !claudeAvailable;
   claudeInteractiveButton.disabled = !claudeAvailable;

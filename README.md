@@ -2,7 +2,7 @@
 
 **El modelo justo para cada laburo.**
 
-ChePrompt es una extensión de VS Code que analiza una tarea, propone el modelo de OpenCode Go más adecuado y explica la decisión antes de ejecutar nada.
+ChePrompt es una extensión de VS Code que analiza una tarea, puntúa runtimes y modelos elegibles y explica la ruta antes de ejecutar nada.
 
 ## Estado
 
@@ -11,7 +11,7 @@ Este repositorio contiene el MVP inicial:
 - panel lateral dentro de VS Code;
 - perfiles Económico, Equilibrado y Máxima calidad;
 - clasificación local y determinística de complejidad;
-- decisión visible con modelo, motivo, confianza e impacto relativo de uso;
+- decisión visible entre OpenCode Go, Claude Code y Codex, con puntaje, motivo, cupo y alternativas;
 - inventario local de runtimes, proveedores y modelos descubierto desde OpenCode;
 - ventanas oficiales de uso de OpenCode Go, con porcentaje restante y reinicio cuando el API lo informa;
 - ejecución con salida incremental en ChePrompt, cancelación y alternativa de terminal interactiva;
@@ -26,8 +26,8 @@ La selección actual es una hipótesis medible, no una promesa de calidad. El si
 
 - VS Code 1.100 o posterior.
 - Node.js 20 o posterior.
-- OpenCode v2 instalado y autenticado.
-- Una cuenta OpenCode Go con modelos disponibles.
+- Al menos un runtime elegible: OpenCode Go, Claude Pro vía Claude Code o ChatGPT/Codex vía Codex CLI.
+- OpenCode v2 y una cuenta OpenCode Go si querés usar sus modelos.
 - Opcional, para Claude Pro: Claude Code CLI instalado y autenticado por su login oficial.
 - Opcional, para ChatGPT/Codex: Codex CLI instalado y autenticado con ChatGPT; las API keys usan facturación aparte.
 
@@ -78,19 +78,19 @@ prompt → clasificación local → decisión explicada → confirmación → st
 ```
 
 1. Escribí la tarea.
-2. Elegí el perfil de costo/calidad.
+2. Elegí el perfil económico, equilibrado o calidad.
 3. Presioná **Analizar ruta**.
 4. Revisá el modelo y el motivo.
-5. Presioná **Ejecutar en ChePrompt** o elegí explícitamente Claude Pro/Codex si están autenticados; para aprobaciones, elegí la terminal interactiva del runtime.
+5. Revisá el runtime/modelo elegido automáticamente y presioná **Ejecutar ruta elegida**; si preferís, elegí Claude Pro o Codex como override explícito. Para aprobaciones, abrí la terminal interactiva del runtime.
 
-La ejecución normal transmite eventos JSON de OpenCode, Claude Code o Codex al panel. Si se necesita una aprobación interactiva, usá la terminal correspondiente para continuar la sesión en su TUI. ChePrompt no guarda claves ni activa aprobaciones automáticas; las aprobaciones siguen bajo control del usuario. Claude Pro se usa solo con el CLI oficial de Claude Code, nunca mediante plugins de suscripción de OpenCode. Claude Code y Codex conservan su autenticación en sus almacenes oficiales.
+El router puntúa de forma local y determinística los candidatos descubiertos de los tres runtimes. Los puntajes son hipótesis iniciales, no una garantía de calidad. Las ventanas oficiales de OpenCode Go limitan el enrutamiento cuando están frescas; cupos desconocidos no se estiman ni se tratan como cero. La ejecución transmite eventos JSON de OpenCode, Claude Code o Codex al panel. ChePrompt no copia credenciales ni activa aprobaciones automáticas; Claude Pro se usa solo mediante el CLI oficial de Claude Code, y cada CLI conserva su autenticación en su almacén oficial.
 
 ## Arquitectura
 
 ```text
 src/
   extension.ts   Vista y protocolo del webview
-  router.ts      Clasificador y selección pura
+  router.ts      Scoring local, puro y determinístico
   opencode.ts    Inventario y adaptador de ejecución de OpenCode
   claude-code.ts Descubrimiento y ejecución vía Claude Code oficial
   codex.ts       Descubrimiento y ejecución vía Codex CLI oficial
