@@ -27,7 +27,7 @@ For UI changes, press `F5` and exercise analyze → review → execute in the Ex
 
 ## Next milestone
 
-Implement M1 runtime inventory and stable contracts exactly as scoped in `docs/ROADMAP.md`.
+Complete the pending Extension Development Host validation for M1.5 and M2 documented in `docs/STATE.md` before starting M3.
 
 ## Continuity protocol
 

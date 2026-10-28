@@ -226,6 +226,48 @@ ul {
   color: var(--vscode-button-secondaryForeground);
 }
 
+.secondary {
+  color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground);
+}
+
+.hint {
+  margin: 8px 0 0;
+  font-size: 11px;
+}
+
+.execution {
+  margin-top: 18px;
+  padding: 14px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 8px;
+  background: var(--vscode-editor-background);
+}
+
+.execution h2 {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+
+.execution-output {
+  max-height: 320px;
+  overflow: auto;
+  font-family: var(--vscode-editor-font-family);
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+
+.execution-output p {
+  margin: 6px 0;
+  color: var(--vscode-foreground);
+  overflow-wrap: anywhere;
+}
+
+.execution-output .execution-error,
+.execution-output .execution-approval_required {
+  color: var(--vscode-errorForeground);
+}
+
 #status {
   min-height: 20px;
   margin: 10px 0 0;

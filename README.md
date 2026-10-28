@@ -14,6 +14,7 @@ Este repositorio contiene el MVP inicial:
 - decisión visible con modelo, motivo, confianza e impacto relativo de uso;
 - inventario local de runtimes, proveedores y modelos descubierto desde OpenCode;
 - ventanas oficiales de uso de OpenCode Go, con porcentaje restante y reinicio cuando el API lo informa;
+- ejecución con salida incremental en ChePrompt, cancelación y alternativa de terminal interactiva;
 - confirmación explícita antes de abrir `opencode run`;
 - pruebas unitarias para routing, inventario y uso oficial usando procesos falsos.
 
@@ -69,16 +70,16 @@ El instalador nunca reemplaza una carpeta o enlace existente: si encuentra un co
 ## Flujo del MVP
 
 ```text
-prompt → clasificación local → decisión explicada → confirmación → opencode run
+prompt → clasificación local → decisión explicada → confirmación → streaming / terminal interactiva
 ```
 
 1. Escribí la tarea.
 2. Elegí el perfil de costo/calidad.
 3. Presioná **Analizar ruta**.
 4. Revisá el modelo y el motivo.
-5. Presioná **Ejecutar con este modelo**.
+5. Presioná **Ejecutar en ChePrompt** o elegí la terminal interactiva si la tarea requiere aprobaciones.
 
-OpenCode se abre en un terminal nuevo con el modelo seleccionado. ChePrompt no guarda claves ni activa `--auto`; las aprobaciones de herramientas siguen bajo control del usuario.
+La ejecución normal transmite eventos JSON de OpenCode al panel. Si se necesita una aprobación interactiva, usá **Abrir terminal interactiva** para continuar la sesión en el TUI. ChePrompt no guarda claves ni activa `--auto`; las aprobaciones siguen bajo control del usuario.
 
 ## Arquitectura
 

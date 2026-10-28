@@ -1,7 +1,12 @@
 import * as vscode from "vscode";
-import { launchOpenCode, OpenCodeAdapter } from "./opencode";
+import {
+  launchOpenCodeInteractive,
+  OpenCodeAdapter,
+  OpenCodeExecutionAdapter,
+  OpenCodeExecutionHandle,
+} from "./opencode";
 import { routePrompt } from "./router";
-import { RoutingDecision, RoutingProfile, RuntimeInventory } from "./types";
+import { RoutingDecision, RoutingProfile, RuntimeExecutionEvent, RuntimeInventory } from "./types";
 
 export function activate(context: vscode.ExtensionContext): void {
   const provider = new ChePromptViewProvider(context.extensionUri);
@@ -21,6 +26,8 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
   private lastPrompt?: string;
   private lastDecision?: RoutingDecision;
   private inventory?: RuntimeInventory;
+  private activeExecution?: OpenCodeExecutionHandle;
+  private lastExecutionSessionId?: string;
 
   constructor(private readonly extensionUri: vscode.Uri) {}
 
@@ -43,10 +50,24 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         return;
       }
 
+      if (message.type === "cancelExecution") {
+        this.activeExecution?.cancel();
+        return;
+      }
+
+      if (message.type === "interactiveFallback") {
+        await this.openInteractiveFallback(view.webview);
+        return;
+      }
+
       if (message.type === "analyze") {
         try {
+          if (this.activeExecution) {
+            throw new Error("Cancelá la ejecución actual antes de analizar otra tarea.");
+          }
           this.lastPrompt = undefined;
           this.lastDecision = undefined;
+          this.lastExecutionSessionId = undefined;
           if (!this.inventory) {
             throw new Error("El inventario de modelos todavía no está disponible. Revisá OpenCode e intentá de nuevo.");
           }
@@ -72,8 +93,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
           return;
         }
 
-        launchOpenCode(this.lastPrompt, this.lastDecision);
-        await view.webview.postMessage({ type: "executed" });
+        this.startExecution(view.webview);
       }
     });
   }
@@ -101,6 +121,75 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
     const usageAdapter = adapter ?? new OpenCodeAdapter(executable);
     const snapshot = await usageAdapter.getUsageLimits();
     await webview.postMessage({ type: "usage", snapshot });
+  }
+
+  private startExecution(webview: vscode.Webview): void {
+    if (!this.lastPrompt || !this.lastDecision || this.activeExecution) {
+      void webview.postMessage({
+        type: "executionError",
+        message: this.activeExecution
+          ? "Ya hay una tarea en ejecución. Cancelala antes de iniciar otra."
+          : "Analizá la tarea antes de ejecutarla.",
+      });
+      return;
+    }
+
+    const executable = vscode.workspace.getConfiguration("cheprompt").get<string>("opencodePath", "opencode");
+    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    try {
+      const execution = new OpenCodeExecutionAdapter(executable).start(
+        this.lastPrompt,
+        this.lastDecision,
+        cwd,
+        (event: RuntimeExecutionEvent) => {
+          if (event.sessionId) this.lastExecutionSessionId = event.sessionId;
+          void webview.postMessage({ type: "executionEvent", event });
+        },
+      );
+      this.activeExecution = execution;
+      void execution.result.then(async (result) => {
+        if (result.sessionId) this.lastExecutionSessionId = result.sessionId;
+        if (this.activeExecution === execution) this.activeExecution = undefined;
+        await webview.postMessage({ type: "executionResult", result });
+      }).catch(async (error: unknown) => {
+        if (this.activeExecution === execution) this.activeExecution = undefined;
+        await webview.postMessage({
+          type: "executionError",
+          message: error instanceof Error ? error.message : "No se pudo completar la ejecución.",
+        });
+      });
+    } catch (error) {
+      void webview.postMessage({
+        type: "executionError",
+        message: error instanceof Error ? error.message : "No se pudo iniciar OpenCode.",
+      });
+    }
+  }
+
+  private async openInteractiveFallback(webview: vscode.Webview): Promise<void> {
+    if (!this.lastPrompt || !this.lastDecision) {
+      await webview.postMessage({ type: "executionError", message: "Analizá la tarea antes de abrir OpenCode." });
+      return;
+    }
+
+    let sessionId = this.lastExecutionSessionId;
+    if (this.activeExecution) {
+      const execution = this.activeExecution;
+      execution.cancel();
+      const result = await execution.result;
+      sessionId = result.sessionId ?? sessionId;
+      if (this.activeExecution === execution) this.activeExecution = undefined;
+    }
+
+    try {
+      launchOpenCodeInteractive(this.lastPrompt, this.lastDecision, sessionId);
+      await webview.postMessage({ type: "interactiveFallbackOpened" });
+    } catch (error) {
+      await webview.postMessage({
+        type: "executionError",
+        message: error instanceof Error ? error.message : "No se pudo abrir la terminal interactiva.",
+      });
+    }
   }
 
   private getHtml(webview: vscode.Webview): string {
@@ -172,7 +261,16 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
           <summary>Alternativas consideradas</summary>
           <ul id="alternatives"></ul>
         </details>
-        <button id="execute" class="run">Ejecutar con este modelo</button>
+        <button id="execute" class="run">Ejecutar en ChePrompt</button>
+        <button id="interactive-fallback" class="secondary" type="button">Abrir terminal interactiva</button>
+        <p class="hint">Usá la terminal si OpenCode necesita una aprobación interactiva.</p>
+      </section>
+
+      <section id="execution" class="execution hidden" aria-live="polite">
+        <h2>Salida de OpenCode</h2>
+        <p id="execution-status" role="status"></p>
+        <div id="execution-output" class="execution-output"></div>
+        <button id="cancel-execution" class="secondary" type="button">Cancelar ejecución</button>
       </section>
     </main>
 
@@ -191,14 +289,21 @@ type AnalyzeMessage = {
 
 type ExecuteMessage = { type: "execute" };
 type RefreshUsageMessage = { type: "refreshUsage" };
+type CancelExecutionMessage = { type: "cancelExecution" };
+type InteractiveFallbackMessage = { type: "interactiveFallback" };
 
-function isWebviewMessage(value: unknown): value is AnalyzeMessage | ExecuteMessage | RefreshUsageMessage {
+function isWebviewMessage(value: unknown): value is
+  | AnalyzeMessage
+  | ExecuteMessage
+  | RefreshUsageMessage
+  | CancelExecutionMessage
+  | InteractiveFallbackMessage {
   if (!value || typeof value !== "object" || !("type" in value)) {
     return false;
   }
 
   const candidate = value as Record<string, unknown>;
-  if (candidate.type === "execute" || candidate.type === "refreshUsage") {
+  if (["execute", "refreshUsage", "cancelExecution", "interactiveFallback"].includes(String(candidate.type))) {
     return true;
   }
 

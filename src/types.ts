@@ -67,6 +67,36 @@ export interface UsageSnapshot {
   freshness: UsageFreshness;
 }
 
+export type RuntimeExecutionEventType =
+  | "started"
+  | "text"
+  | "step"
+  | "tool"
+  | "diagnostic"
+  | "approval_required"
+  | "error"
+  | "completed"
+  | "cancelled";
+
+export interface RuntimeExecutionEvent {
+  executionId: string;
+  type: RuntimeExecutionEventType;
+  timestamp: number;
+  sessionId?: string;
+  text?: string;
+  message?: string;
+}
+
+export type RuntimeExecutionStatus = "succeeded" | "failed" | "cancelled";
+
+export interface RuntimeExecutionResult {
+  executionId: string;
+  status: RuntimeExecutionStatus;
+  exitCode: number;
+  sessionId?: string;
+  error?: string;
+}
+
 export interface RuntimeAdapter {
   getInventory(): Promise<RuntimeInventory>;
   getUsageLimits?(): Promise<UsageSnapshot>;

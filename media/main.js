@@ -4,6 +4,11 @@ const promptInput = document.getElementById("prompt");
 const profileInput = document.getElementById("profile");
 const analyzeButton = document.getElementById("analyze");
 const executeButton = document.getElementById("execute");
+const interactiveFallbackButton = document.getElementById("interactive-fallback");
+const executionPanel = document.getElementById("execution");
+const executionStatus = document.getElementById("execution-status");
+const executionOutput = document.getElementById("execution-output");
+const cancelExecutionButton = document.getElementById("cancel-execution");
 const decisionPanel = document.getElementById("decision");
 const status = document.getElementById("status");
 const inventoryStatus = document.getElementById("inventory-status");
@@ -18,6 +23,8 @@ profileInput.value = document.body.dataset.defaultProfile || "balanced";
 analyzeButton.addEventListener("click", () => {
   status.textContent = "Analizando complejidad, costo relativo y capacidad…";
   decisionPanel.classList.add("hidden");
+  executionPanel.classList.add("hidden");
+  executionOutput.replaceChildren();
   vscode.postMessage({
     type: "analyze",
     prompt: promptInput.value,
@@ -27,8 +34,26 @@ analyzeButton.addEventListener("click", () => {
 
 executeButton.addEventListener("click", () => {
   executeButton.disabled = true;
-  status.textContent = "Abriendo OpenCode…";
+  executionPanel.classList.remove("hidden");
+  analyzeButton.disabled = true;
+  executionOutput.replaceChildren();
+  executionStatus.textContent = "Iniciando OpenCode…";
+  cancelExecutionButton.disabled = false;
   vscode.postMessage({ type: "execute" });
+});
+
+interactiveFallbackButton.addEventListener("click", () => {
+  interactiveFallbackButton.disabled = true;
+  executionPanel.classList.remove("hidden");
+  analyzeButton.disabled = true;
+  executionStatus.textContent = "Cancelando la ejecución actual y abriendo la terminal interactiva…";
+  vscode.postMessage({ type: "interactiveFallback" });
+});
+
+cancelExecutionButton.addEventListener("click", () => {
+  cancelExecutionButton.disabled = true;
+  executionStatus.textContent = "Cancelando ejecución…";
+  vscode.postMessage({ type: "cancelExecution" });
 });
 
 refreshUsageButton.addEventListener("click", () => {
@@ -67,6 +92,44 @@ window.addEventListener("message", ({ data }) => {
     return;
   }
 
+  if (data.type === "executionEvent") {
+    renderExecutionEvent(data.event);
+    return;
+  }
+
+  if (data.type === "executionResult") {
+    const result = data.result;
+    executeButton.disabled = false;
+    analyzeButton.disabled = false;
+    cancelExecutionButton.disabled = true;
+    if (result.status === "succeeded") {
+      executionStatus.textContent = "OpenCode terminó correctamente.";
+    } else if (result.status === "cancelled") {
+      executionStatus.textContent = "Ejecución cancelada.";
+    } else {
+      executionStatus.textContent = result.error || "OpenCode terminó con un error. Podés continuar en la terminal interactiva.";
+    }
+    interactiveFallbackButton.disabled = false;
+    return;
+  }
+
+  if (data.type === "executionError") {
+    executeButton.disabled = false;
+    analyzeButton.disabled = false;
+    cancelExecutionButton.disabled = true;
+    interactiveFallbackButton.disabled = false;
+    executionStatus.textContent = data.message;
+    return;
+  }
+
+  if (data.type === "interactiveFallbackOpened") {
+    analyzeButton.disabled = false;
+    interactiveFallbackButton.disabled = false;
+    cancelExecutionButton.disabled = true;
+    executionStatus.textContent = "Terminal interactiva abierta. Las aprobaciones quedan bajo tu control.";
+    return;
+  }
+
   if (data.type === "error") {
     status.textContent = data.message;
     executeButton.disabled = false;
@@ -102,8 +165,34 @@ window.addEventListener("message", ({ data }) => {
   );
 
   status.textContent = "Ruta lista. Revisala antes de ejecutar.";
+  executeButton.disabled = false;
+  interactiveFallbackButton.disabled = false;
   decisionPanel.classList.remove("hidden");
 });
+
+function renderExecutionEvent(event) {
+  if (event.type === "started") {
+    executionStatus.textContent = "OpenCode está trabajando…";
+    return;
+  }
+  if (event.type === "text") {
+    const line = document.createElement("p");
+    line.className = "execution-text";
+    line.textContent = event.text || "";
+    executionOutput.append(line);
+    return;
+  }
+
+  if (event.type === "approval_required") {
+    executionStatus.textContent = "Se requiere una aprobación interactiva. Abrí la terminal para continuar.";
+  }
+  if (event.message) {
+    const line = document.createElement("p");
+    line.className = `execution-${event.type}`;
+    line.textContent = event.message;
+    executionOutput.append(line);
+  }
+}
 
 function renderUsageSnapshot(snapshot) {
   refreshUsageButton.disabled = false;

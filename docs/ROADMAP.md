@@ -1,6 +1,6 @@
 # ChePrompt roadmap
 
-Updated: 2026-10-27
+Updated: 2026-10-28
 
 ## Product outcome
 
@@ -12,8 +12,8 @@ The router optimizes expected successful completion, not the cheapest first call
 
 - **Completed:** M0 foundation.
 - **Completed:** M1 runtime inventory and stable contracts.
-- **Now:** M1.5 implementation complete; Extension Development Host validation pending.
-- **Next:** M2 unified execution inside ChePrompt.
+- **Now:** M2 implementation complete; Extension Development Host validation pending.
+- **Next:** M3 Claude Code, M3.5 ChatGPT/Codex and M4 adaptive routing.
 - **Later:** Claude Code, ChatGPT/Codex, adaptive routing, evaluation-driven learning, automatic fallback and parallel agents.
 
 ## Now
@@ -32,7 +32,7 @@ Outcome:
 
 ### M1 — Runtime inventory and stable contracts
 
-**Status:** Implemented; manual F5 validation pending (2026-10-27)
+**Status:** Done (2026-10-27)
 
 Outcome: ChePrompt can describe which runtimes and models are actually available without spending model tokens.
 
@@ -56,7 +56,7 @@ Dependencies:
 
 ### M1.5 — Provider-reported usage visibility
 
-**Status:** Done (2026-10-27)
+**Status:** Implemented; manual F5 validation pending (2026-10-27)
 
 Outcome: ChePrompt shows the exact remaining allowance and reset windows when an official provider surface exposes them, without presenting guesses as account data.
 
@@ -75,7 +75,7 @@ Definition of done:
 
 Result: OpenCode's official schema defines each meter's raw `percent` as the portion already used, so ChePrompt displays `100 - percent` as remaining. The UI refreshes through the official `opencode api` client and hides data once older than five minutes. No live account was queried during tests.
 
-Limitations: the endpoint is experimental and its errors/changed schemas display as unknown. UI validation in Extension Development Host remains to be done manually; no usage data is stored and routing scores are unchanged. Do not close M1.5 or begin M2 until the F5 flow has been exercised.
+Limitations: the endpoint is experimental and its errors/changed schemas display as unknown. UI validation in Extension Development Host remains to be done manually; no usage data is stored and routing scores are unchanged. M1.5's F5 check is still outstanding; the user explicitly authorized starting M2 before that check. Validate both flows together before closing either milestone.
 
 Dependencies:
 
@@ -86,17 +86,21 @@ Dependencies:
 
 ### M2 — Unified execution inside ChePrompt
 
-**Status:** Not started
+**Status:** Implemented; manual F5 validation pending (2026-10-28)
 
 Outcome: prompts, streaming output, cancellation and errors remain in the ChePrompt panel instead of opening an unmanaged terminal.
 
 Definition of done:
 
-- [ ] Add a runtime execution result/event contract.
-- [ ] Stream OpenCode output into the webview.
-- [ ] Support cancellation and a visible terminal fallback for interactive approvals.
-- [ ] Never enable blanket auto-approval by default.
-- [ ] Add integration tests around process lifecycle and malformed output.
+- [x] Add a runtime execution result/event contract.
+- [x] Stream OpenCode output into the webview.
+- [x] Support cancellation and a visible terminal fallback for interactive approvals.
+- [x] Never enable blanket auto-approval by default.
+- [x] Add integration tests around process lifecycle and malformed output.
+
+Result: OpenCode runs with `--format json` and no `--auto`; text/tool/step/error events stream into the panel. The user can cancel or open the same session in an interactive TUI when approval is needed. Process creation, cancellation, session capture, permission fallback and malformed JSONL are covered with fake processes.
+
+Limitations: `opencode run` is non-interactive and rejects permission requests; ChePrompt surfaces the request and lets the user cancel and attach the session in the interactive TUI. Visual F5 validation is pending, along with M1.5's pending usage-panel check. Do not begin M3 until both are exercised.
 
 ### M3 — Claude Pro through Claude Code
 
