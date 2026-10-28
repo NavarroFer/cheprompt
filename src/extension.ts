@@ -38,6 +38,11 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         return;
       }
 
+      if (message.type === "refreshUsage") {
+        await this.discoverUsage(view.webview);
+        return;
+      }
+
       if (message.type === "analyze") {
         try {
           this.lastPrompt = undefined;
@@ -75,8 +80,9 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
 
   private async discoverInventory(webview: vscode.Webview): Promise<void> {
     const executable = vscode.workspace.getConfiguration("cheprompt").get<string>("opencodePath", "opencode");
+    const adapter = new OpenCodeAdapter(executable);
     try {
-      const inventory = await new OpenCodeAdapter(executable).getInventory();
+      const inventory = await adapter.getInventory();
       this.inventory = inventory;
       await webview.postMessage({ type: "inventory", inventory });
     } catch (error) {
@@ -85,7 +91,16 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         type: "inventoryError",
         message: error instanceof Error ? error.message : "No pudimos consultar el inventario de OpenCode.",
       });
+    } finally {
+      await this.discoverUsage(webview, adapter);
     }
+  }
+
+  private async discoverUsage(webview: vscode.Webview, adapter?: OpenCodeAdapter): Promise<void> {
+    const executable = vscode.workspace.getConfiguration("cheprompt").get<string>("opencodePath", "opencode");
+    const usageAdapter = adapter ?? new OpenCodeAdapter(executable);
+    const snapshot = await usageAdapter.getUsageLimits();
+    await webview.postMessage({ type: "usage", snapshot });
   }
 
   private getHtml(webview: vscode.Webview): string {
@@ -132,6 +147,15 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         <ul id="inventory-models"></ul>
       </section>
 
+      <section id="usage" class="usage" aria-live="polite">
+        <div class="usage-heading">
+          <h2>Uso de OpenCode Go</h2>
+          <button id="refresh-usage" class="compact" type="button" disabled>Actualizar</button>
+        </div>
+        <p id="usage-status">Consultando límites oficiales…</p>
+        <ul id="usage-windows"></ul>
+      </section>
+
       <section id="decision" class="decision hidden" aria-live="polite">
         <div class="decision-heading">
           <span id="complexity" class="pill"></span>
@@ -166,14 +190,15 @@ type AnalyzeMessage = {
 };
 
 type ExecuteMessage = { type: "execute" };
+type RefreshUsageMessage = { type: "refreshUsage" };
 
-function isWebviewMessage(value: unknown): value is AnalyzeMessage | ExecuteMessage {
+function isWebviewMessage(value: unknown): value is AnalyzeMessage | ExecuteMessage | RefreshUsageMessage {
   if (!value || typeof value !== "object" || !("type" in value)) {
     return false;
   }
 
   const candidate = value as Record<string, unknown>;
-  if (candidate.type === "execute") {
+  if (candidate.type === "execute" || candidate.type === "refreshUsage") {
     return true;
   }
 

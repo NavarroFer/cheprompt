@@ -8,6 +8,12 @@ export type RuntimeAvailability = "available" | "unavailable" | "expired";
 
 export type RuntimeCapability = "text" | "tools" | "vision" | "reasoning";
 
+export type UsageWindow = "rolling" | "weekly" | "monthly";
+
+export type UsageFreshness = "fresh" | "stale" | "unknown";
+
+export type UsageStatus = "available" | "not-available" | "unknown";
+
 export interface RuntimeDescriptor {
   id: string;
   name: string;
@@ -45,8 +51,25 @@ export interface RuntimeInventory {
   discoveredAt: string;
 }
 
+export interface UsageWindowSnapshot {
+  window: UsageWindow;
+  remainingPercent: number;
+  resetsAt: number;
+}
+
+export interface UsageSnapshot {
+  runtimeId: string;
+  provider: string;
+  status: UsageStatus;
+  windows: UsageWindowSnapshot[];
+  source: string;
+  observedAt: number;
+  freshness: UsageFreshness;
+}
+
 export interface RuntimeAdapter {
   getInventory(): Promise<RuntimeInventory>;
+  getUsageLimits?(): Promise<UsageSnapshot>;
 }
 
 export interface RoutingDecision {

@@ -8,7 +8,14 @@ import {
   RuntimeInventory,
   RuntimeModel,
   RuntimeDescriptor,
+  UsageSnapshot,
+  UsageWindow,
 } from "./types";
+
+export const USAGE_LIMITS_ENDPOINT = "/api/experimental/usage/limits";
+export const USAGE_SNAPSHOT_MAX_AGE_MS = 5 * 60 * 1000;
+const USAGE_SOURCE = `OpenCode API ${USAGE_LIMITS_ENDPOINT}`;
+const USAGE_WINDOWS: readonly UsageWindow[] = ["rolling", "weekly", "monthly"];
 
 export interface ProcessResult {
   stdout: string;
@@ -84,6 +91,106 @@ export class OpenCodeAdapter implements RuntimeAdapter {
       throw error;
     }
   }
+
+  async getUsageLimits(): Promise<UsageSnapshot> {
+    try {
+      // The official CLI resolves its managed server and credentials from OpenCode's own store.
+      const result = await this.processExecutor.run(this.executable, ["api", "GET", USAGE_LIMITS_ENDPOINT]);
+      const observedAt = Date.now();
+      if (result.exitCode !== 0) {
+        return unknownUsageSnapshot(observedAt);
+      }
+      return parseOpenCodeUsageLimits(result.stdout, observedAt, observedAt);
+    } catch {
+      return unknownUsageSnapshot(Date.now());
+    }
+  }
+}
+
+export function parseOpenCodeUsageLimits(
+  output: string,
+  observedAt: number,
+  now: number,
+): UsageSnapshot {
+  const base = {
+    runtimeId: OPENCODE_RUNTIME.id,
+    provider: "OpenCode Go",
+    source: USAGE_SOURCE,
+    observedAt,
+  };
+
+  let response: unknown;
+  try {
+    response = JSON.parse(output);
+  } catch {
+    return { ...base, status: "unknown", windows: [], freshness: "unknown" };
+  }
+
+  const freshness = usageFreshness(observedAt, now);
+  if (freshness !== "fresh") {
+    return { ...base, status: "unknown", windows: [], freshness };
+  }
+
+  if (response === null) {
+    return { ...base, status: "not-available", windows: [], freshness };
+  }
+  if (!isRecord(response) || !isRecord(response.workspace) || !Array.isArray(response.budgets)) {
+    return { ...base, status: "unknown", windows: [], freshness: "unknown" };
+  }
+  if (response.go === undefined) {
+    return { ...base, status: "not-available", windows: [], freshness };
+  }
+  if (!isRecord(response.go)) {
+    return { ...base, status: "unknown", windows: [], freshness: "unknown" };
+  }
+
+  const windows = [];
+  for (const window of USAGE_WINDOWS) {
+    const meter = response.go[window];
+    if (
+      !isRecord(meter)
+      || typeof meter.percent !== "number"
+      || !Number.isFinite(meter.percent)
+      || meter.percent < 0
+      || meter.percent > 100
+      || typeof meter.limited !== "boolean"
+      || typeof meter.resetsAt !== "number"
+      || !Number.isFinite(meter.resetsAt)
+    ) {
+      return { ...base, status: "unknown", windows: [], freshness: "unknown" };
+    }
+    windows.push({
+      window,
+      // The official schema documents percent as allowance already used.
+      remainingPercent: 100 - meter.percent,
+      resetsAt: meter.resetsAt,
+    });
+  }
+
+  return { ...base, status: "available", windows, freshness };
+}
+
+export function usageFreshness(observedAt: number, now: number): "fresh" | "stale" | "unknown" {
+  if (!Number.isFinite(observedAt) || !Number.isFinite(now) || observedAt > now) {
+    return "unknown";
+  }
+  return now - observedAt >= USAGE_SNAPSHOT_MAX_AGE_MS ? "stale" : "fresh";
+}
+
+function unknownUsageSnapshot(observedAt: number): UsageSnapshot {
+  return {
+    runtimeId: OPENCODE_RUNTIME.id,
+    provider: "OpenCode Go",
+    status: "unknown",
+    windows: [],
+    source: USAGE_SOURCE,
+    observedAt,
+    freshness: "unknown",
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
 function parseModelIds(output: string): string[] {

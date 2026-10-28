@@ -13,8 +13,9 @@ Este repositorio contiene el MVP inicial:
 - clasificación local y determinística de complejidad;
 - decisión visible con modelo, motivo, confianza e impacto relativo de uso;
 - inventario local de runtimes, proveedores y modelos descubierto desde OpenCode;
+- ventanas oficiales de uso de OpenCode Go, con porcentaje restante y reinicio cuando el API lo informa;
 - confirmación explícita antes de abrir `opencode run`;
-- pruebas unitarias para routing e inventario usando procesos falsos.
+- pruebas unitarias para routing, inventario y uso oficial usando procesos falsos.
 
 La selección actual es una hipótesis medible, no una promesa de calidad. El siguiente paso es registrar resultados reales —tests, latencia, correcciones y consumo— y ajustar el router con evidencia.
 

@@ -126,6 +126,43 @@ button:disabled {
   margin-bottom: 0;
 }
 
+.usage {
+  margin-top: 18px;
+  padding: 12px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 8px;
+  background: var(--vscode-editor-background);
+}
+
+.usage-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.usage h2 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.usage p,
+.usage li {
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+
+.usage ul {
+  margin-bottom: 0;
+}
+
+.compact {
+  width: auto;
+  margin: 0;
+  padding: 5px 8px;
+  font-size: 11px;
+}
+
 .decision-heading {
   display: flex;
   align-items: center;

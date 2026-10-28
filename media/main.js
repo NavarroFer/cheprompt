@@ -8,6 +8,10 @@ const decisionPanel = document.getElementById("decision");
 const status = document.getElementById("status");
 const inventoryStatus = document.getElementById("inventory-status");
 const inventoryModels = document.getElementById("inventory-models");
+const usageStatus = document.getElementById("usage-status");
+const usageWindows = document.getElementById("usage-windows");
+const refreshUsageButton = document.getElementById("refresh-usage");
+let latestUsageSnapshot;
 
 profileInput.value = document.body.dataset.defaultProfile || "balanced";
 
@@ -25,6 +29,12 @@ executeButton.addEventListener("click", () => {
   executeButton.disabled = true;
   status.textContent = "Abriendo OpenCode…";
   vscode.postMessage({ type: "execute" });
+});
+
+refreshUsageButton.addEventListener("click", () => {
+  refreshUsageButton.disabled = true;
+  usageStatus.textContent = "Actualizando límites oficiales…";
+  vscode.postMessage({ type: "refreshUsage" });
 });
 
 window.addEventListener("message", ({ data }) => {
@@ -48,6 +58,12 @@ window.addEventListener("message", ({ data }) => {
         return item;
       }),
     );
+    return;
+  }
+
+  if (data.type === "usage") {
+    latestUsageSnapshot = data.snapshot;
+    renderUsageSnapshot(latestUsageSnapshot);
     return;
   }
 
@@ -88,3 +104,40 @@ window.addEventListener("message", ({ data }) => {
   status.textContent = "Ruta lista. Revisala antes de ejecutar.";
   decisionPanel.classList.remove("hidden");
 });
+
+function renderUsageSnapshot(snapshot) {
+  refreshUsageButton.disabled = false;
+  const age = Date.now() - snapshot.observedAt;
+  const stale = snapshot.freshness === "stale" || !Number.isFinite(age) || age < 0 || age >= 5 * 60 * 1000;
+  const available = snapshot.status === "available" && snapshot.freshness === "fresh" && !stale;
+  if (!available) {
+    usageStatus.textContent = stale || snapshot.freshness === "stale"
+      ? "Not available · el dato quedó desactualizado; actualizá para consultar de nuevo."
+      : snapshot.status === "unknown"
+        ? "Not available · no se pudo validar una respuesta oficial; no se estima el saldo."
+        : "Not available · OpenCode no informó un porcentaje oficial para esta cuenta.";
+    usageWindows.replaceChildren();
+    return;
+  }
+
+  const observed = formatUsageTime(snapshot.observedAt);
+  usageStatus.textContent = `Fuente: ${snapshot.source} · última consulta: ${observed}`;
+  const labels = { rolling: "Rolling (5 horas)", weekly: "Semanal", monthly: "Mensual" };
+  usageWindows.replaceChildren(
+    ...snapshot.windows.map((window) => {
+      const item = document.createElement("li");
+      item.textContent = `${labels[window.window]}: ${window.remainingPercent}% restante · reinicia ${formatUsageTime(window.resetsAt)} · ${snapshot.source} · consultado ${observed}`;
+      return item;
+    }),
+  );
+}
+
+function formatUsageTime(timestamp) {
+  return new Date(timestamp).toLocaleString("es-AR");
+}
+
+setInterval(() => {
+  if (latestUsageSnapshot) {
+    renderUsageSnapshot(latestUsageSnapshot);
+  }
+}, 30 * 1000);

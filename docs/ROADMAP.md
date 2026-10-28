@@ -12,9 +12,9 @@ The router optimizes expected successful completion, not the cheapest first call
 
 - **Completed:** M0 foundation.
 - **Completed:** M1 runtime inventory and stable contracts.
-- **Now:** M1.5 provider-reported usage visibility.
-- **Next:** unified execution, Claude Code, ChatGPT/Codex and adaptive routing.
-- **Later:** evaluation-driven learning, automatic fallback and parallel agents.
+- **Now:** M1.5 implementation complete; Extension Development Host validation pending.
+- **Next:** M2 unified execution inside ChePrompt.
+- **Later:** Claude Code, ChatGPT/Codex, adaptive routing, evaluation-driven learning, automatic fallback and parallel agents.
 
 ## Now
 
@@ -32,7 +32,7 @@ Outcome:
 
 ### M1 — Runtime inventory and stable contracts
 
-**Status:** Done (2026-10-27)
+**Status:** Implemented; manual F5 validation pending (2026-10-27)
 
 Outcome: ChePrompt can describe which runtimes and models are actually available without spending model tokens.
 
@@ -56,22 +56,26 @@ Dependencies:
 
 ### M1.5 — Provider-reported usage visibility
 
-**Status:** Not started
+**Status:** Done (2026-10-27)
 
 Outcome: ChePrompt shows the exact remaining allowance and reset windows when an official provider surface exposes them, without presenting guesses as account data.
 
 Definition of done:
 
-- [ ] Add an optional `getUsageLimits()` capability to `RuntimeAdapter`.
-- [ ] Represent usage window, remaining percentage, reset time, source, observation time and freshness in typed contracts.
-- [ ] Implement OpenCode Go usage discovery through its official experimental usage-limits endpoint.
-- [ ] Confirm the endpoint's percentage semantics before normalizing to `remainingPercent`; do not infer whether a raw percentage means used or remaining.
-- [ ] Show every reported window separately, including rolling, weekly and monthly meters when present.
-- [ ] Display the data source and last refresh time next to each percentage.
-- [ ] Display `Not available` when a runtime does not officially expose a percentage; do not estimate it or scrape dashboards.
-- [ ] Treat missing, stale or malformed usage data as unknown, never as zero allowance.
-- [ ] Add offline unit tests for exact windows, unsupported usage, stale data and malformed responses.
-- [ ] Preserve the existing routing and explicit execution confirmation; quota-aware scoring belongs to M4.
+- [x] Add an optional `getUsageLimits()` capability to `RuntimeAdapter`.
+- [x] Represent usage window, remaining percentage, reset time, source, observation time and freshness in typed contracts.
+- [x] Implement OpenCode Go usage discovery through its official experimental usage-limits endpoint.
+- [x] Confirm the endpoint's percentage semantics before normalizing to `remainingPercent`; do not infer whether a raw percentage means used or remaining.
+- [x] Show every reported window separately, including rolling, weekly and monthly meters when present.
+- [x] Display the data source and last refresh time next to each percentage.
+- [x] Display `Not available` when a runtime does not officially expose a percentage; do not estimate it or scrape dashboards.
+- [x] Treat missing, stale or malformed usage data as unknown, never as zero allowance.
+- [x] Add offline unit tests for exact windows, unsupported usage, stale data and malformed responses.
+- [x] Preserve the existing routing and explicit execution confirmation; quota-aware scoring belongs to M4.
+
+Result: OpenCode's official schema defines each meter's raw `percent` as the portion already used, so ChePrompt displays `100 - percent` as remaining. The UI refreshes through the official `opencode api` client and hides data once older than five minutes. No live account was queried during tests.
+
+Limitations: the endpoint is experimental and its errors/changed schemas display as unknown. UI validation in Extension Development Host remains to be done manually; no usage data is stored and routing scores are unchanged. Do not close M1.5 or begin M2 until the F5 flow has been exercised.
 
 Dependencies:
 
