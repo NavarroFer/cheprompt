@@ -6,6 +6,8 @@ const analyzeButton = document.getElementById("analyze");
 const executeButton = document.getElementById("execute");
 const decisionPanel = document.getElementById("decision");
 const status = document.getElementById("status");
+const inventoryStatus = document.getElementById("inventory-status");
+const inventoryModels = document.getElementById("inventory-models");
 
 profileInput.value = document.body.dataset.defaultProfile || "balanced";
 
@@ -26,6 +28,29 @@ executeButton.addEventListener("click", () => {
 });
 
 window.addEventListener("message", ({ data }) => {
+  if (data.type === "inventoryError") {
+    inventoryStatus.textContent = data.message;
+    status.textContent = data.message;
+    return;
+  }
+
+  if (data.type === "inventory") {
+    const { runtime, providers, models } = data.inventory;
+    const providerNames = providers.map((provider) => provider.name).join(", ");
+    inventoryStatus.textContent = `${runtime.name} · proveedores: ${providerNames} · ${models.length} modelo(s)`;
+    inventoryModels.replaceChildren(
+      ...models.map((model) => {
+        const item = document.createElement("li");
+        item.textContent = `${model.id} · impacto ${model.usageImpact} · ${model.availability}`;
+        if (model.expiresAt) {
+          item.textContent += ` · vence ${model.expiresAt}`;
+        }
+        return item;
+      }),
+    );
+    return;
+  }
+
   if (data.type === "error") {
     status.textContent = data.message;
     executeButton.disabled = false;

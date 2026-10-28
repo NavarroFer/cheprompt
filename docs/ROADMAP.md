@@ -11,8 +11,9 @@ The router optimizes expected successful completion, not the cheapest first call
 ## Status overview
 
 - **Completed:** M0 foundation.
-- **Now:** M1 runtime inventory and contracts.
-- **Next:** unified execution, Claude Code and adaptive routing.
+- **Completed:** M1 runtime inventory and stable contracts.
+- **Now:** M2 unified execution inside ChePrompt.
+- **Next:** Claude Code and adaptive routing.
 - **Later:** evaluation-driven learning, automatic fallback and parallel agents.
 
 ## Now
@@ -31,20 +32,22 @@ Outcome:
 
 ### M1 — Runtime inventory and stable contracts
 
-**Status:** Not started
+**Status:** Done (2026-10-27)
 
 Outcome: ChePrompt can describe which runtimes and models are actually available without spending model tokens.
 
 Definition of done:
 
-- [ ] Introduce a `RuntimeAdapter` contract independent of VS Code UI code.
-- [ ] Implement an `OpenCodeAdapter` that checks CLI availability and lists models.
-- [ ] Represent runtime, provider, model, availability, capabilities and expiration in typed contracts.
-- [ ] Exclude unavailable or expired candidates before scoring.
-- [ ] Show the discovered provider/model inventory in the ChePrompt panel.
-- [ ] Add unit tests using fake process execution; tests must not require network access.
-- [ ] Preserve the current explicit confirmation before execution.
-- [ ] Update `docs/STATE.md` and mark this milestone Done.
+- [x] Introduce a `RuntimeAdapter` contract independent of VS Code UI code.
+- [x] Implement an `OpenCodeAdapter` that checks CLI availability and lists models.
+- [x] Represent runtime, provider, model, availability, capabilities and expiration in typed contracts.
+- [x] Exclude unavailable or expired candidates before scoring.
+- [x] Show the discovered provider/model inventory in the ChePrompt panel.
+- [x] Add unit tests using fake process execution; tests must not require network access.
+- [x] Preserve the current explicit confirmation before execution.
+- [x] Update `docs/STATE.md` and mark this milestone Done.
+
+Limitations: discovery verifies that the CLI runs and reports model IDs; it does not validate provider authentication, quota or model reachability. Models outside the existing baseline use a neutral `medium` relative usage impact until evaluation evidence supports better estimates.
 
 Dependencies:
 

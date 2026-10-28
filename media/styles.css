@@ -104,6 +104,28 @@ button:disabled {
   background: var(--vscode-editor-background);
 }
 
+.inventory {
+  margin-top: 18px;
+  padding: 12px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 8px;
+}
+
+.inventory h2 {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+
+.inventory p,
+.inventory li {
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+
+.inventory ul {
+  margin-bottom: 0;
+}
+
 .decision-heading {
   display: flex;
   align-items: center;

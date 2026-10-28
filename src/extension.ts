@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
-import { launchOpenCode } from "./opencode";
+import { launchOpenCode, OpenCodeAdapter } from "./opencode";
 import { routePrompt } from "./router";
-import { RoutingDecision, RoutingProfile } from "./types";
+import { RoutingDecision, RoutingProfile, RuntimeInventory } from "./types";
 
 export function activate(context: vscode.ExtensionContext): void {
   const provider = new ChePromptViewProvider(context.extensionUri);
@@ -20,6 +20,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private lastPrompt?: string;
   private lastDecision?: RoutingDecision;
+  private inventory?: RuntimeInventory;
 
   constructor(private readonly extensionUri: vscode.Uri) {}
 
@@ -30,6 +31,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
       localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, "media")],
     };
     view.webview.html = this.getHtml(view.webview);
+    void this.discoverInventory(view.webview);
 
     view.webview.onDidReceiveMessage(async (message: unknown) => {
       if (!isWebviewMessage(message)) {
@@ -38,7 +40,12 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
 
       if (message.type === "analyze") {
         try {
-          const decision = routePrompt(message.prompt, message.profile);
+          this.lastPrompt = undefined;
+          this.lastDecision = undefined;
+          if (!this.inventory) {
+            throw new Error("El inventario de modelos todavía no está disponible. Revisá OpenCode e intentá de nuevo.");
+          }
+          const decision = routePrompt(message.prompt, message.profile, this.inventory.models, Date.now());
           this.lastPrompt = message.prompt.trim();
           this.lastDecision = decision;
           await view.webview.postMessage({ type: "decision", decision });
@@ -64,6 +71,21 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         await view.webview.postMessage({ type: "executed" });
       }
     });
+  }
+
+  private async discoverInventory(webview: vscode.Webview): Promise<void> {
+    const executable = vscode.workspace.getConfiguration("cheprompt").get<string>("opencodePath", "opencode");
+    try {
+      const inventory = await new OpenCodeAdapter(executable).getInventory();
+      this.inventory = inventory;
+      await webview.postMessage({ type: "inventory", inventory });
+    } catch (error) {
+      this.inventory = undefined;
+      await webview.postMessage({
+        type: "inventoryError",
+        message: error instanceof Error ? error.message : "No pudimos consultar el inventario de OpenCode.",
+      });
+    }
   }
 
   private getHtml(webview: vscode.Webview): string {
@@ -103,6 +125,12 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
 
       <button id="analyze" class="primary">Analizar ruta</button>
       <p id="status" role="status" aria-live="polite"></p>
+
+      <section id="inventory" class="inventory" aria-live="polite">
+        <h2>Inventario de runtimes</h2>
+        <p id="inventory-status">Consultando OpenCode…</p>
+        <ul id="inventory-models"></ul>
+      </section>
 
       <section id="decision" class="decision hidden" aria-live="polite">
         <div class="decision-heading">

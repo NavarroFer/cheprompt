@@ -12,8 +12,9 @@ Este repositorio contiene el MVP inicial:
 - perfiles Económico, Equilibrado y Máxima calidad;
 - clasificación local y determinística de complejidad;
 - decisión visible con modelo, motivo, confianza e impacto relativo de uso;
+- inventario local de runtimes, proveedores y modelos descubierto desde OpenCode;
 - confirmación explícita antes de abrir `opencode run`;
-- pruebas unitarias para la primera heurística.
+- pruebas unitarias para routing e inventario usando procesos falsos.
 
 La selección actual es una hipótesis medible, no una promesa de calidad. El siguiente paso es registrar resultados reales —tests, latencia, correcciones y consumo— y ajustar el router con evidencia.
 
@@ -84,7 +85,7 @@ OpenCode se abre en un terminal nuevo con el modelo seleccionado. ChePrompt no g
 src/
   extension.ts   Vista y protocolo del webview
   router.ts      Clasificador y selección pura
-  opencode.ts    Adaptador de ejecución de OpenCode
+  opencode.ts    Inventario y adaptador de ejecución de OpenCode
   types.ts       Contratos del pipeline
   test/           Pruebas del router
 media/
