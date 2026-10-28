@@ -15,8 +15,9 @@ Este repositorio contiene el MVP inicial:
 - inventario local de runtimes, proveedores y modelos descubierto desde OpenCode;
 - ventanas oficiales de uso de OpenCode Go, con porcentaje restante y reinicio cuando el API lo informa;
 - ejecución con salida incremental en ChePrompt, cancelación y alternativa de terminal interactiva;
-- confirmación explícita antes de abrir `opencode run`;
-- pruebas unitarias para routing, inventario y uso oficial usando procesos falsos.
+- opción explícita de Claude Pro mediante el CLI oficial de Claude Code;
+- confirmación explícita antes de ejecutar cualquiera de los runtimes;
+- pruebas unitarias para routing, inventario, uso oficial y adaptadores con procesos falsos.
 
 La selección actual es una hipótesis medible, no una promesa de calidad. El siguiente paso es registrar resultados reales —tests, latencia, correcciones y consumo— y ajustar el router con evidencia.
 
@@ -26,6 +27,7 @@ La selección actual es una hipótesis medible, no una promesa de calidad. El si
 - Node.js 20 o posterior.
 - OpenCode v2 instalado y autenticado.
 - Una cuenta OpenCode Go con modelos disponibles.
+- Opcional, para Claude Pro: Claude Code CLI instalado y autenticado por su login oficial.
 
 ## Desarrollo
 
@@ -77,9 +79,9 @@ prompt → clasificación local → decisión explicada → confirmación → st
 2. Elegí el perfil de costo/calidad.
 3. Presioná **Analizar ruta**.
 4. Revisá el modelo y el motivo.
-5. Presioná **Ejecutar en ChePrompt** o elegí la terminal interactiva si la tarea requiere aprobaciones.
+5. Presioná **Ejecutar en ChePrompt** o **Ejecutar con Claude Pro** si Claude Code está autenticado; para aprobaciones, elegí la terminal interactiva del runtime.
 
-La ejecución normal transmite eventos JSON de OpenCode al panel. Si se necesita una aprobación interactiva, usá **Abrir terminal interactiva** para continuar la sesión en el TUI. ChePrompt no guarda claves ni activa `--auto`; las aprobaciones siguen bajo control del usuario.
+La ejecución normal transmite eventos JSON de OpenCode o Claude Code al panel. Si se necesita una aprobación interactiva, usá la terminal correspondiente para continuar la sesión en su TUI. ChePrompt no guarda claves ni activa aprobaciones automáticas; las aprobaciones siguen bajo control del usuario. Claude Pro se usa solo con el CLI oficial de Claude Code, nunca mediante plugins de suscripción de OpenCode. La cuenta se autentica y permanece en el almacén oficial de Claude Code.
 
 ## Arquitectura
 
@@ -88,8 +90,9 @@ src/
   extension.ts   Vista y protocolo del webview
   router.ts      Clasificador y selección pura
   opencode.ts    Inventario y adaptador de ejecución de OpenCode
+  claude-code.ts Descubrimiento y ejecución vía Claude Code oficial
   types.ts       Contratos del pipeline
-  test/           Pruebas del router
+  test/           Pruebas de routing y adaptadores
 media/
   main.js         Interacción del panel
   styles.css      Presentación nativa de VS Code

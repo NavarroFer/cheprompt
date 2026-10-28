@@ -27,7 +27,7 @@ For UI changes, press `F5` and exercise analyze → review → execute in the Ex
 
 ## Next milestone
 
-Complete the pending Extension Development Host validation for M1.5 and M2 documented in `docs/STATE.md` before starting M3.
+Integrate the in-progress M3.5 adapter documented in `docs/ROADMAP.md`; do not start M4 until M1.5/M2/M3/M3.5 have been validated together in the Extension Development Host.
 
 ## Continuity protocol
 

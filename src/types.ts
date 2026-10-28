@@ -18,6 +18,8 @@ export interface RuntimeDescriptor {
   id: string;
   name: string;
   availability: RuntimeAvailability;
+  installed?: boolean;
+  message?: string;
   expiresAt?: string;
 }
 
@@ -95,6 +97,7 @@ export interface RuntimeExecutionResult {
   exitCode: number;
   sessionId?: string;
   error?: string;
+  runtimeUnavailable?: boolean;
 }
 
 export interface RuntimeAdapter {

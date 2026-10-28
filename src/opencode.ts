@@ -27,7 +27,12 @@ export interface ProcessResult {
 }
 
 export interface ProcessExecutor {
-  run(executable: string, args: readonly string[]): Promise<ProcessResult>;
+  run(executable: string, args: readonly string[], options?: ProcessExecutionOptions): Promise<ProcessResult>;
+}
+
+export interface ProcessExecutionOptions {
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
 }
 
 export interface ProcessCompletion {
@@ -43,19 +48,21 @@ export interface StreamingProcess {
 }
 
 export interface StreamingProcessSpawner {
-  start(executable: string, args: readonly string[], cwd?: string): StreamingProcess;
+  start(executable: string, args: readonly string[], cwd?: string, env?: NodeJS.ProcessEnv): StreamingProcess;
 }
 
-export interface OpenCodeExecutionHandle {
+export interface RuntimeExecutionHandle {
   executionId: string;
   result: Promise<RuntimeExecutionResult>;
   cancel(): void;
 }
 
+export type OpenCodeExecutionHandle = RuntimeExecutionHandle;
+
 export class NodeProcessExecutor implements ProcessExecutor {
-  run(executable: string, args: readonly string[]): Promise<ProcessResult> {
+  run(executable: string, args: readonly string[], options: ProcessExecutionOptions = {}): Promise<ProcessResult> {
     return new Promise((resolve, reject) => {
-      const child = spawn(executable, [...args], { stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawn(executable, [...args], { ...options, stdio: ["ignore", "pipe", "pipe"] });
       let stdout = "";
       let stderr = "";
 
@@ -70,9 +77,10 @@ export class NodeProcessExecutor implements ProcessExecutor {
 }
 
 export class NodeStreamingProcessSpawner implements StreamingProcessSpawner {
-  start(executable: string, args: readonly string[], cwd?: string): StreamingProcess {
+  start(executable: string, args: readonly string[], cwd?: string, env?: NodeJS.ProcessEnv): StreamingProcess {
     const child = spawn(executable, [...args], {
       cwd,
+      env,
       stdio: ["ignore", "pipe", "pipe"],
     });
     let spawnError: Error | undefined;

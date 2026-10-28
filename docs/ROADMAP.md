@@ -12,8 +12,8 @@ The router optimizes expected successful completion, not the cheapest first call
 
 - **Completed:** M0 foundation.
 - **Completed:** M1 runtime inventory and stable contracts.
-- **Now:** M2 implementation complete; Extension Development Host validation pending.
-- **Next:** M3 Claude Code, M3.5 ChatGPT/Codex and M4 adaptive routing.
+- **Now:** M3 implementation complete; Claude Pro sign-in and F5 validation pending. M3.5 adapter work is proceeding in parallel.
+- **Next:** Integrate M3.5, then M4 adaptive routing.
 - **Later:** Claude Code, ChatGPT/Codex, adaptive routing, evaluation-driven learning, automatic fallback and parallel agents.
 
 ## Now
@@ -104,22 +104,26 @@ Limitations: `opencode run` is non-interactive and rejects permission requests; 
 
 ### M3 — Claude Pro through Claude Code
 
-**Status:** Not started
+**Status:** Implementation complete; Claude Pro sign-in and F5 validation pending (2026-10-28)
 
 Outcome: ChePrompt can select Claude Pro by invoking the official Claude Code CLI directly.
 
 Definition of done:
 
-- [ ] Install and authenticate Claude Code using the user's Claude Pro account.
-- [ ] Implement `ClaudeCodeAdapter` without copying Claude credentials into ChePrompt.
-- [ ] Detect quota/auth failures and mark the runtime temporarily unavailable.
-- [ ] Stream execution through the same M2 event contract.
-- [ ] Include an exact remaining allowance only if an official Claude CLI/API surface exposes it; otherwise show `Not available`.
-- [ ] Document that Claude Pro credentials must not be reused through OpenCode plugins.
+- [x] Install the official Claude Code CLI (native version 2.1.312); authenticate with the user's Claude Pro account remains pending user action.
+- [x] Implement `ClaudeCodeAdapter` without copying Claude credentials into ChePrompt.
+- [x] Detect quota/auth failures and mark the runtime temporarily unavailable.
+- [x] Stream execution through the same M2 event contract.
+- [x] Show `Not available` because the official CLI/docs reviewed do not expose an exact remaining subscription percentage.
+- [x] Document that Claude Pro credentials must not be reused through OpenCode plugins.
+
+Result: Claude Code is exposed as an explicit runtime choice after route review. The adapter checks the official CLI auth status, accepts only Claude subscription OAuth methods, filters API-key and third-party provider environment overrides, and streams `stream-json` events without automatic permission bypass. Auth/quota failures cool the runtime down for one minute.
+
+Limitations: no Claude Pro login or live execution was initiated. The user must complete the official login from the panel and test the M1.5/M2/M3 flows in Extension Development Host. M3.5 adapter implementation is being developed in an isolated worktree in parallel; M4 remains blocked on integration and final user validation.
 
 ### M3.5 — ChatGPT/Codex runtime
 
-**Status:** Not started
+**Status:** Adapter implementation in progress in an isolated worktree (2026-10-28)
 
 Outcome: ChePrompt can select the user's officially authenticated OpenAI coding runtime without copying account credentials.
 

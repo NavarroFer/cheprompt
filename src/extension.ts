@@ -1,9 +1,14 @@
 import * as vscode from "vscode";
 import {
+  ClaudeCodeAdapter,
+  launchClaudeCodeInteractive,
+  launchClaudeCodeLogin,
+} from "./claude-code";
+import {
   launchOpenCodeInteractive,
   OpenCodeAdapter,
   OpenCodeExecutionAdapter,
-  OpenCodeExecutionHandle,
+  RuntimeExecutionHandle,
 } from "./opencode";
 import { routePrompt } from "./router";
 import { RoutingDecision, RoutingProfile, RuntimeExecutionEvent, RuntimeInventory } from "./types";
@@ -26,7 +31,11 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
   private lastPrompt?: string;
   private lastDecision?: RoutingDecision;
   private inventory?: RuntimeInventory;
-  private activeExecution?: OpenCodeExecutionHandle;
+  private claudeAdapter?: ClaudeCodeAdapter;
+  private claudeInventory?: RuntimeInventory;
+  private activeExecution?: RuntimeExecutionHandle;
+  private activeRuntime: "opencode" | "claude-code" = "opencode";
+  private lastExecutionRuntime: "opencode" | "claude-code" = "opencode";
   private lastExecutionSessionId?: string;
 
   constructor(private readonly extensionUri: vscode.Uri) {}
@@ -39,6 +48,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
     };
     view.webview.html = this.getHtml(view.webview);
     void this.discoverInventory(view.webview);
+    void this.discoverClaudeCode(view.webview);
 
     view.webview.onDidReceiveMessage(async (message: unknown) => {
       if (!isWebviewMessage(message)) {
@@ -60,6 +70,30 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         return;
       }
 
+      if (message.type === "claudeInteractive") {
+        await this.openClaudeInteractive(view.webview);
+        return;
+      }
+
+      if (message.type === "refreshClaude") {
+        await this.discoverClaudeCode(view.webview);
+        return;
+      }
+
+      if (message.type === "claudeLogin") {
+        try {
+          launchClaudeCodeLogin();
+          await view.webview.postMessage({ type: "claudeLoginOpened" });
+        } catch (error) {
+          await view.webview.postMessage({
+            type: "executionError",
+            runtimeId: "claude-code",
+            message: error instanceof Error ? error.message : "No se pudo abrir el login de Claude Code.",
+          });
+        }
+        return;
+      }
+
       if (message.type === "analyze") {
         try {
           if (this.activeExecution) {
@@ -68,6 +102,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
           this.lastPrompt = undefined;
           this.lastDecision = undefined;
           this.lastExecutionSessionId = undefined;
+          this.lastExecutionRuntime = "opencode";
           if (!this.inventory) {
             throw new Error("El inventario de modelos todavía no está disponible. Revisá OpenCode e intentá de nuevo.");
           }
@@ -93,7 +128,12 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
           return;
         }
 
-        this.startExecution(view.webview);
+        this.startExecution(view.webview, "opencode");
+        return;
+      }
+
+      if (message.type === "executeClaude") {
+        this.startExecution(view.webview, "claude-code");
       }
     });
   }
@@ -123,10 +163,22 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
     await webview.postMessage({ type: "usage", snapshot });
   }
 
-  private startExecution(webview: vscode.Webview): void {
+  private async discoverClaudeCode(webview: vscode.Webview): Promise<void> {
+    const executable = vscode.workspace.getConfiguration("cheprompt").get<string>("claudeCodePath", "claude");
+    const adapter = this.claudeAdapter ?? new ClaudeCodeAdapter(executable);
+    this.claudeAdapter = adapter;
+    const inventory = await adapter.getInventory();
+    this.claudeInventory = inventory;
+    await webview.postMessage({ type: "claudeRuntime", inventory });
+    const usage = await adapter.getUsageLimits?.();
+    if (usage) await webview.postMessage({ type: "claudeUsage", snapshot: usage });
+  }
+
+  private startExecution(webview: vscode.Webview, runtime: "opencode" | "claude-code"): void {
     if (!this.lastPrompt || !this.lastDecision || this.activeExecution) {
       void webview.postMessage({
         type: "executionError",
+        runtimeId: runtime,
         message: this.activeExecution
           ? "Ya hay una tarea en ejecución. Cancelala antes de iniciar otra."
           : "Analizá la tarea antes de ejecutarla.",
@@ -134,39 +186,63 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    const executable = vscode.workspace.getConfiguration("cheprompt").get<string>("opencodePath", "opencode");
+    if (runtime === "claude-code" && this.claudeInventory?.runtime.availability !== "available") {
+      void webview.postMessage({
+        type: "executionError",
+        runtimeId: runtime,
+        message: this.claudeInventory?.runtime.message ?? "Claude Code no está autenticado con una cuenta Claude Pro.",
+      });
+      return;
+    }
+
     const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     try {
-      const execution = new OpenCodeExecutionAdapter(executable).start(
-        this.lastPrompt,
-        this.lastDecision,
-        cwd,
-        (event: RuntimeExecutionEvent) => {
-          if (event.sessionId) this.lastExecutionSessionId = event.sessionId;
-          void webview.postMessage({ type: "executionEvent", event });
-        },
-      );
+      const onEvent = (event: RuntimeExecutionEvent) => {
+        if (event.sessionId) this.lastExecutionSessionId = event.sessionId;
+        void webview.postMessage({ type: "executionEvent", event, runtimeId: runtime });
+      };
+      const execution = runtime === "opencode"
+        ? new OpenCodeExecutionAdapter(
+            vscode.workspace.getConfiguration("cheprompt").get<string>("opencodePath", "opencode"),
+          ).start(this.lastPrompt, this.lastDecision, cwd, onEvent)
+        : this.claudeAdapter!.start(this.lastPrompt, cwd, onEvent);
       this.activeExecution = execution;
+      this.activeRuntime = runtime;
+      this.lastExecutionRuntime = runtime;
       void execution.result.then(async (result) => {
         if (result.sessionId) this.lastExecutionSessionId = result.sessionId;
         if (this.activeExecution === execution) this.activeExecution = undefined;
-        await webview.postMessage({ type: "executionResult", result });
+        await webview.postMessage({ type: "executionResult", result, runtimeId: runtime });
+        if (runtime === "claude-code" && result.runtimeUnavailable && this.claudeAdapter) {
+          this.claudeInventory = await this.claudeAdapter.getInventory();
+          await webview.postMessage({ type: "claudeRuntime", inventory: this.claudeInventory });
+        }
       }).catch(async (error: unknown) => {
         if (this.activeExecution === execution) this.activeExecution = undefined;
         await webview.postMessage({
           type: "executionError",
+          runtimeId: runtime,
           message: error instanceof Error ? error.message : "No se pudo completar la ejecución.",
         });
       });
     } catch (error) {
       void webview.postMessage({
         type: "executionError",
+        runtimeId: runtime,
         message: error instanceof Error ? error.message : "No se pudo iniciar OpenCode.",
       });
     }
   }
 
   private async openInteractiveFallback(webview: vscode.Webview): Promise<void> {
+    if (this.activeRuntime === "claude-code" || this.lastExecutionRuntime === "claude-code") {
+      await webview.postMessage({
+        type: "executionError",
+        runtimeId: "opencode",
+        message: "Usá la terminal interactiva de Claude Code para continuar esta sesión.",
+      });
+      return;
+    }
     if (!this.lastPrompt || !this.lastDecision) {
       await webview.postMessage({ type: "executionError", message: "Analizá la tarea antes de abrir OpenCode." });
       return;
@@ -183,11 +259,52 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
 
     try {
       launchOpenCodeInteractive(this.lastPrompt, this.lastDecision, sessionId);
+      this.lastExecutionRuntime = "opencode";
       await webview.postMessage({ type: "interactiveFallbackOpened" });
     } catch (error) {
       await webview.postMessage({
         type: "executionError",
         message: error instanceof Error ? error.message : "No se pudo abrir la terminal interactiva.",
+      });
+    }
+  }
+
+  private async openClaudeInteractive(webview: vscode.Webview): Promise<void> {
+    if (!this.lastPrompt || !this.lastDecision || this.claudeInventory?.runtime.availability !== "available") {
+      await webview.postMessage({
+        type: "executionError",
+        runtimeId: "claude-code",
+        message: this.claudeInventory?.runtime.message ?? "Analizá la tarea y verificá Claude Code antes de abrirlo.",
+      });
+      return;
+    }
+    if (this.activeExecution && this.activeRuntime !== "claude-code") {
+      await webview.postMessage({
+        type: "executionError",
+        runtimeId: "claude-code",
+        message: "Cancelá la ejecución actual antes de cambiar a Claude Code.",
+      });
+      return;
+    }
+
+    let sessionId = this.lastExecutionRuntime === "claude-code" ? this.lastExecutionSessionId : undefined;
+    if (this.activeExecution) {
+      const execution = this.activeExecution;
+      execution.cancel();
+      const result = await execution.result;
+      sessionId = result.sessionId ?? sessionId;
+      if (this.activeExecution === execution) this.activeExecution = undefined;
+    }
+
+    try {
+      launchClaudeCodeInteractive(this.lastPrompt, sessionId);
+      this.lastExecutionRuntime = "claude-code";
+      await webview.postMessage({ type: "claudeInteractiveOpened" });
+    } catch (error) {
+      await webview.postMessage({
+        type: "executionError",
+        runtimeId: "claude-code",
+        message: error instanceof Error ? error.message : "No se pudo abrir Claude Code interactivo.",
       });
     }
   }
@@ -245,6 +362,21 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         <ul id="usage-windows"></ul>
       </section>
 
+      <section id="claude-runtime" class="runtime-card" aria-live="polite">
+        <h2>Claude Pro · Claude Code</h2>
+        <p id="claude-runtime-status">Verificando Claude Code…</p>
+        <p id="claude-usage-status">Uso: Not available</p>
+        <div class="runtime-controls">
+          <button id="claude-login" class="compact secondary" type="button" disabled>Iniciar sesión</button>
+          <button id="refresh-claude" class="compact secondary" type="button">Actualizar estado</button>
+        </div>
+        <div id="claude-actions" class="hidden">
+          <button id="execute-claude" class="secondary" type="button" disabled>Ejecutar con Claude Pro</button>
+          <button id="claude-interactive" class="secondary" type="button" disabled>Abrir Claude Code interactivo</button>
+        </div>
+        <p class="hint">Esta opción usa la sesión oficial de Claude Code; no cambia el scoring de OpenCode.</p>
+      </section>
+
       <section id="decision" class="decision hidden" aria-live="polite">
         <div class="decision-heading">
           <span id="complexity" class="pill"></span>
@@ -255,7 +387,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         <p id="reason"></p>
         <dl>
           <div><dt>Impacto de uso</dt><dd id="impact"></dd></div>
-          <div><dt>Precio</dt><dd id="pricing"></dd></div>
+          <div><dt>Precio de OpenCode</dt><dd id="pricing"></dd></div>
         </dl>
         <details>
           <summary>Alternativas consideradas</summary>
@@ -267,7 +399,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
       </section>
 
       <section id="execution" class="execution hidden" aria-live="polite">
-        <h2>Salida de OpenCode</h2>
+        <h2>Salida del runtime</h2>
         <p id="execution-status" role="status"></p>
         <div id="execution-output" class="execution-output"></div>
         <button id="cancel-execution" class="secondary" type="button">Cancelar ejecución</button>
@@ -291,19 +423,36 @@ type ExecuteMessage = { type: "execute" };
 type RefreshUsageMessage = { type: "refreshUsage" };
 type CancelExecutionMessage = { type: "cancelExecution" };
 type InteractiveFallbackMessage = { type: "interactiveFallback" };
+type ExecuteClaudeMessage = { type: "executeClaude" };
+type ClaudeInteractiveMessage = { type: "claudeInteractive" };
+type RefreshClaudeMessage = { type: "refreshClaude" };
+type ClaudeLoginMessage = { type: "claudeLogin" };
 
 function isWebviewMessage(value: unknown): value is
   | AnalyzeMessage
   | ExecuteMessage
   | RefreshUsageMessage
   | CancelExecutionMessage
-  | InteractiveFallbackMessage {
+  | InteractiveFallbackMessage
+  | ExecuteClaudeMessage
+  | ClaudeInteractiveMessage
+  | RefreshClaudeMessage
+  | ClaudeLoginMessage {
   if (!value || typeof value !== "object" || !("type" in value)) {
     return false;
   }
 
   const candidate = value as Record<string, unknown>;
-  if (["execute", "refreshUsage", "cancelExecution", "interactiveFallback"].includes(String(candidate.type))) {
+  if ([
+    "execute",
+    "refreshUsage",
+    "cancelExecution",
+    "interactiveFallback",
+    "executeClaude",
+    "claudeInteractive",
+    "refreshClaude",
+    "claudeLogin",
+  ].includes(String(candidate.type))) {
     return true;
   }
 

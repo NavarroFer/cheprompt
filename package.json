@@ -72,6 +72,11 @@
           "type": "string",
           "default": "opencode",
           "description": "Ruta al ejecutable de OpenCode."
+        },
+        "cheprompt.claudeCodePath": {
+          "type": "string",
+          "default": "claude",
+          "description": "Ruta al CLI oficial de Claude Code."
         }
       }
     }
