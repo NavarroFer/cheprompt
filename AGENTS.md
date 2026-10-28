@@ -2,7 +2,7 @@
 
 ## Product goal
 
-ChePrompt routes one coding task to an appropriate OpenCode model while making the decision, trade-offs and estimated usage impact visible before execution.
+ChePrompt routes one coding task to the most suitable eligible runtime and model while making the decision, trade-offs and estimated usage impact visible before execution.
 
 ## Architectural rules
 
@@ -27,4 +27,17 @@ For UI changes, press `F5` and exercise analyze → review → execute in the Ex
 
 ## Next milestone
 
-Add local run records containing model, routing reason, latency and verification outcome without storing raw prompts by default.
+Implement M1 runtime inventory and stable contracts exactly as scoped in `docs/ROADMAP.md`.
+
+## Continuity protocol
+
+Every coding agent must follow this protocol:
+
+1. Read `docs/STATE.md` and `docs/ROADMAP.md` before proposing changes.
+2. Work on only one milestone at a time unless the user explicitly expands scope.
+3. Keep provider credentials outside the repository.
+4. Run `npm run check` and `npm test` before finishing.
+5. Update the milestone status and `docs/STATE.md` with completed work, validation, blockers and the exact next action.
+6. Commit completed milestone work atomically.
+
+If a session is interrupted, the repository documentation is the source of truth, not chat history.

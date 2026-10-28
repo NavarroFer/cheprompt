@@ -94,12 +94,11 @@ media/
 
 ## Roadmap sugerido
 
-1. Validar manualmente 20 tareas representativas.
-2. Registrar modelo, latencia, consumo y resultado de tests.
-3. Recalibrar reglas y modelos con esos datos.
-4. Agregar escalamiento automático sólo cuando falla una verificación.
-5. Incorporar subagentes y worktrees para tareas paralelas.
-6. Evaluar un plugin nativo de OpenCode cuando el comportamiento esté validado.
+El plan de trabajo y el estado de continuidad viven en:
+
+- [`docs/ROADMAP.md`](docs/ROADMAP.md): hitos, prioridades y criterios de terminado.
+- [`docs/STATE.md`](docs/STATE.md): estado actual, restricciones y próximo paso exacto.
+- [`docs/OPENCODE.md`](docs/OPENCODE.md): instrucciones y prompts para continuar con OpenCode Go.
 
 ## Licencia
 
