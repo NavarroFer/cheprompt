@@ -6,6 +6,7 @@ import {
   claudeSubscriptionEnvironment,
   isClaudeSubscriptionAuth,
   parseClaudeAuthStatus,
+  safeClaudeError,
 } from "../claude-code";
 import {
   ProcessCompletion,
@@ -231,4 +232,10 @@ test("removes API-key and third-party overrides while leaving the official subsc
     "--permission-mode",
     "default",
   ]);
+});
+
+test("redacts credentials from Claude CLI errors before showing them", () => {
+  const message = safeClaudeError("Failed with sk-ant-api03-secret-value and Bearer oauth-secret");
+  assert.equal(message.includes("sk-ant-api03-secret-value"), false);
+  assert.equal(message.includes("oauth-secret"), false);
 });

@@ -308,9 +308,14 @@ export function isAuthOrQuotaFailure(message: string): boolean {
 }
 
 export function safeClaudeError(message: string): string {
-  return isAuthOrQuotaFailure(message)
-    ? "Claude Code necesita autenticación o alcanzó un límite de uso. Revisá la cuenta en la CLI oficial."
-    : message;
+  if (isAuthOrQuotaFailure(message)) {
+    return "Claude Code necesita autenticación o alcanzó un límite de uso. Revisá la cuenta en la CLI oficial.";
+  }
+  return message
+    .replace(/\bsk-ant-[A-Za-z0-9_-]{8,}\b/g, "[credencial redactada]")
+    .replace(/\bBearer\s+\S+/gi, "Bearer [credencial redactada]")
+    .replace(/((?:access|refresh)[_-]?token\s*[:=]\s*["']?)[^\s"',}]+/gi, "$1[credencial redactada]")
+    .slice(0, 1000);
 }
 
 export function buildClaudeInteractiveArgs(prompt: string, sessionId?: string): string[] {
