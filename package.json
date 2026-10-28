@@ -77,6 +77,16 @@
           "type": "string",
           "default": "claude",
           "description": "Ruta al CLI oficial de Claude Code."
+        },
+        "cheprompt.codexPath": {
+          "type": "string",
+          "default": "codex",
+          "description": "Ruta al CLI oficial de Codex."
+        },
+        "cheprompt.codex.chatgptSubscriptionExpiresAt": {
+          "type": "string",
+          "default": "2026-11-22T00:00:00.000Z",
+          "description": "Vencimiento informado para la suscripción ChatGPT; actualizalo si se renueva. No aplica a auth por API key."
         }
       }
     }

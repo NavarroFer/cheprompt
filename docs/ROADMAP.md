@@ -144,6 +144,7 @@ Definition of done:
 - [x] Detect authentication and quota failures without reading or exposing raw credentials.
 - [x] Include exact remaining usage only if the official integration exposes it; otherwise show `Not available`.
 - [x] Exclude the runtime after 2026-11-21 unless the subscription is renewed or a separate eligible OpenAI account is configured.
+- [ ] Sign in with the official Codex CLI and validate M1.5/M2/M3/M3.5 together in Extension Development Host.
 
 Result: ChePrompt uses the official [Codex CLI authentication status](https://developers.openai.com/codex/auth) and `codex exec --json` with `--sandbox workspace-write --ask-for-approval on-request`, following OpenAI's [non-interactive mode](https://developers.openai.com/codex/non-interactive-mode). Credentials remain in Codex's official store; API-key environment overrides are removed consistently during discovery and execution. ChatGPT subscription and API-key usage are represented as separate allowance pools. Authentication and quota failures temporarily disable the runtime, and no raw process diagnostics or credentials are shown.
 

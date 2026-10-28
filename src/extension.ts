@@ -4,6 +4,7 @@ import {
   launchClaudeCodeInteractive,
   launchClaudeCodeLogin,
 } from "./claude-code";
+import { CodexAdapter } from "./codex";
 import {
   launchOpenCodeInteractive,
   OpenCodeAdapter,
@@ -33,9 +34,11 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
   private inventory?: RuntimeInventory;
   private claudeAdapter?: ClaudeCodeAdapter;
   private claudeInventory?: RuntimeInventory;
+  private codexAdapter?: CodexAdapter;
+  private codexInventory?: RuntimeInventory;
   private activeExecution?: RuntimeExecutionHandle;
-  private activeRuntime: "opencode" | "claude-code" = "opencode";
-  private lastExecutionRuntime: "opencode" | "claude-code" = "opencode";
+  private activeRuntime: "opencode" | "claude-code" | "codex" = "opencode";
+  private lastExecutionRuntime: "opencode" | "claude-code" | "codex" = "opencode";
   private lastExecutionSessionId?: string;
 
   constructor(private readonly extensionUri: vscode.Uri) {}
@@ -49,6 +52,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
     view.webview.html = this.getHtml(view.webview);
     void this.discoverInventory(view.webview);
     void this.discoverClaudeCode(view.webview);
+    void this.discoverCodex(view.webview);
 
     view.webview.onDidReceiveMessage(async (message: unknown) => {
       if (!isWebviewMessage(message)) {
@@ -94,6 +98,21 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         return;
       }
 
+      if (message.type === "refreshCodex") {
+        await this.discoverCodex(view.webview);
+        return;
+      }
+
+      if (message.type === "codexLogin") {
+        this.openCodexLogin(view.webview);
+        return;
+      }
+
+      if (message.type === "codexInteractive") {
+        await this.openCodexInteractive(view.webview);
+        return;
+      }
+
       if (message.type === "analyze") {
         try {
           if (this.activeExecution) {
@@ -103,6 +122,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
           this.lastDecision = undefined;
           this.lastExecutionSessionId = undefined;
           this.lastExecutionRuntime = "opencode";
+          this.activeRuntime = "opencode";
           if (!this.inventory) {
             throw new Error("El inventario de modelos todavía no está disponible. Revisá OpenCode e intentá de nuevo.");
           }
@@ -134,6 +154,11 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
 
       if (message.type === "executeClaude") {
         this.startExecution(view.webview, "claude-code");
+        return;
+      }
+
+      if (message.type === "executeCodex") {
+        this.startExecution(view.webview, "codex");
       }
     });
   }
@@ -174,7 +199,44 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
     if (usage) await webview.postMessage({ type: "claudeUsage", snapshot: usage });
   }
 
-  private startExecution(webview: vscode.Webview, runtime: "opencode" | "claude-code"): void {
+  private async discoverCodex(webview: vscode.Webview): Promise<void> {
+    const configuration = vscode.workspace.getConfiguration("cheprompt");
+    const executable = configuration.get<string>("codexPath", "codex");
+    const subscriptionExpiry = configuration.get<string>(
+      "codex.chatgptSubscriptionExpiresAt",
+      "2026-11-22T00:00:00.000Z",
+    );
+    const adapter = this.codexAdapter ?? new CodexAdapter(executable);
+    this.codexAdapter = adapter;
+    const inventory = await adapter.getInventory(subscriptionExpiry);
+    this.codexInventory = inventory;
+    await webview.postMessage({ type: "codexRuntime", inventory });
+    const usage = await adapter.getUsageLimits();
+    await webview.postMessage({ type: "codexUsage", snapshot: usage });
+  }
+
+  private openCodexLogin(webview: vscode.Webview): void {
+    const executable = vscode.workspace.getConfiguration("cheprompt").get<string>("codexPath", "codex");
+    try {
+      const terminal = vscode.window.createTerminal({
+        name: "Codex · iniciar sesión",
+        shellPath: executable,
+        shellArgs: ["login"],
+        env: { OPENAI_API_KEY: null, CODEX_API_KEY: null },
+        iconPath: new vscode.ThemeIcon("account"),
+      });
+      terminal.show();
+      void webview.postMessage({ type: "codexLoginOpened" });
+    } catch (error) {
+      void webview.postMessage({
+        type: "executionError",
+        runtimeId: "codex",
+        message: error instanceof Error ? error.message : "No se pudo abrir el login de Codex.",
+      });
+    }
+  }
+
+  private startExecution(webview: vscode.Webview, runtime: "opencode" | "claude-code" | "codex"): void {
     if (!this.lastPrompt || !this.lastDecision || this.activeExecution) {
       void webview.postMessage({
         type: "executionError",
@@ -194,6 +256,14 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
       });
       return;
     }
+    if (runtime === "codex" && this.codexInventory?.runtime.availability !== "available") {
+      void webview.postMessage({
+        type: "executionError",
+        runtimeId: runtime,
+        message: this.codexInventory?.runtime.message ?? "Codex no está autenticado o disponible.",
+      });
+      return;
+    }
 
     const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     try {
@@ -205,7 +275,14 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         ? new OpenCodeExecutionAdapter(
             vscode.workspace.getConfiguration("cheprompt").get<string>("opencodePath", "opencode"),
           ).start(this.lastPrompt, this.lastDecision, cwd, onEvent)
-        : this.claudeAdapter!.start(this.lastPrompt, cwd, onEvent);
+        : runtime === "claude-code"
+          ? this.claudeAdapter!.start(this.lastPrompt, cwd, onEvent)
+          : this.codexAdapter!.start(
+              this.lastPrompt,
+              { ...this.lastDecision, selected: this.codexInventory!.models[0] },
+              cwd,
+              onEvent,
+            );
       this.activeExecution = execution;
       this.activeRuntime = runtime;
       this.lastExecutionRuntime = runtime;
@@ -216,6 +293,12 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         if (runtime === "claude-code" && result.runtimeUnavailable && this.claudeAdapter) {
           this.claudeInventory = await this.claudeAdapter.getInventory();
           await webview.postMessage({ type: "claudeRuntime", inventory: this.claudeInventory });
+        }
+        if (runtime === "codex" && result.runtimeUnavailable && this.codexAdapter) {
+          const expiry = vscode.workspace.getConfiguration("cheprompt")
+            .get<string>("codex.chatgptSubscriptionExpiresAt", "2026-11-22T00:00:00.000Z");
+          this.codexInventory = await this.codexAdapter.getInventory(expiry);
+          await webview.postMessage({ type: "codexRuntime", inventory: this.codexInventory });
         }
       }).catch(async (error: unknown) => {
         if (this.activeExecution === execution) this.activeExecution = undefined;
@@ -235,11 +318,11 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async openInteractiveFallback(webview: vscode.Webview): Promise<void> {
-    if (this.activeRuntime === "claude-code" || this.lastExecutionRuntime === "claude-code") {
+    if (this.activeRuntime !== "opencode" || this.lastExecutionRuntime !== "opencode") {
       await webview.postMessage({
         type: "executionError",
         runtimeId: "opencode",
-        message: "Usá la terminal interactiva de Claude Code para continuar esta sesión.",
+        message: "Usá la terminal interactiva del runtime seleccionado para continuar esta sesión.",
       });
       return;
     }
@@ -305,6 +388,55 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         type: "executionError",
         runtimeId: "claude-code",
         message: error instanceof Error ? error.message : "No se pudo abrir Claude Code interactivo.",
+      });
+    }
+  }
+
+  private async openCodexInteractive(webview: vscode.Webview): Promise<void> {
+    if (!this.lastPrompt || !this.lastDecision || this.codexInventory?.runtime.availability !== "available") {
+      await webview.postMessage({
+        type: "executionError",
+        runtimeId: "codex",
+        message: this.codexInventory?.runtime.message ?? "Analizá la tarea y verificá Codex antes de abrirlo.",
+      });
+      return;
+    }
+    if (this.activeExecution && this.activeRuntime !== "codex") {
+      await webview.postMessage({
+        type: "executionError",
+        runtimeId: "codex",
+        message: "Cancelá la ejecución actual antes de cambiar a Codex.",
+      });
+      return;
+    }
+
+    let sessionId = this.lastExecutionRuntime === "codex" ? this.lastExecutionSessionId : undefined;
+    if (this.activeExecution) {
+      const execution = this.activeExecution;
+      execution.cancel();
+      const result = await execution.result;
+      sessionId = result.sessionId ?? sessionId;
+      if (this.activeExecution === execution) this.activeExecution = undefined;
+    }
+
+    try {
+      const executable = vscode.workspace.getConfiguration("cheprompt").get<string>("codexPath", "codex");
+      const terminal = vscode.window.createTerminal({
+        name: "ChePrompt · Codex interactivo",
+        cwd: vscode.workspace.workspaceFolders?.[0]?.uri,
+        shellPath: executable,
+        shellArgs: sessionId ? ["resume", sessionId] : [],
+        env: { OPENAI_API_KEY: null, CODEX_API_KEY: null },
+        iconPath: new vscode.ThemeIcon("sparkle"),
+      });
+      terminal.show();
+      this.lastExecutionRuntime = "codex";
+      await webview.postMessage({ type: "codexInteractiveOpened" });
+    } catch (error) {
+      await webview.postMessage({
+        type: "executionError",
+        runtimeId: "codex",
+        message: error instanceof Error ? error.message : "No se pudo abrir Codex interactivo.",
       });
     }
   }
@@ -377,6 +509,21 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         <p class="hint">Esta opción usa la sesión oficial de Claude Code; no cambia el scoring de OpenCode.</p>
       </section>
 
+      <section id="codex-runtime" class="runtime-card" aria-live="polite">
+        <h2>ChatGPT · Codex</h2>
+        <p id="codex-runtime-status">Verificando Codex…</p>
+        <p id="codex-usage-status">Uso: Not available</p>
+        <div class="runtime-controls">
+          <button id="codex-login" class="compact secondary" type="button" disabled>Iniciar sesión ChatGPT</button>
+          <button id="refresh-codex" class="compact secondary" type="button">Actualizar estado</button>
+        </div>
+        <div id="codex-actions" class="hidden">
+          <button id="execute-codex" class="secondary" type="button" disabled>Ejecutar con Codex</button>
+          <button id="codex-interactive" class="secondary" type="button" disabled>Abrir Codex interactivo</button>
+        </div>
+        <p class="hint">Una API key usa facturación separada. Esta opción es explícita; el routing automático entre runtimes llega en M4.</p>
+      </section>
+
       <section id="decision" class="decision hidden" aria-live="polite">
         <div class="decision-heading">
           <span id="complexity" class="pill"></span>
@@ -427,6 +574,10 @@ type ExecuteClaudeMessage = { type: "executeClaude" };
 type ClaudeInteractiveMessage = { type: "claudeInteractive" };
 type RefreshClaudeMessage = { type: "refreshClaude" };
 type ClaudeLoginMessage = { type: "claudeLogin" };
+type ExecuteCodexMessage = { type: "executeCodex" };
+type CodexInteractiveMessage = { type: "codexInteractive" };
+type RefreshCodexMessage = { type: "refreshCodex" };
+type CodexLoginMessage = { type: "codexLogin" };
 
 function isWebviewMessage(value: unknown): value is
   | AnalyzeMessage
@@ -437,7 +588,11 @@ function isWebviewMessage(value: unknown): value is
   | ExecuteClaudeMessage
   | ClaudeInteractiveMessage
   | RefreshClaudeMessage
-  | ClaudeLoginMessage {
+  | ClaudeLoginMessage
+  | ExecuteCodexMessage
+  | CodexInteractiveMessage
+  | RefreshCodexMessage
+  | CodexLoginMessage {
   if (!value || typeof value !== "object" || !("type" in value)) {
     return false;
   }
@@ -452,6 +607,10 @@ function isWebviewMessage(value: unknown): value is
     "claudeInteractive",
     "refreshClaude",
     "claudeLogin",
+    "executeCodex",
+    "codexInteractive",
+    "refreshCodex",
+    "codexLogin",
   ].includes(String(candidate.type))) {
     return true;
   }

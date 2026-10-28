@@ -23,9 +23,18 @@ const executeClaudeButton = document.getElementById("execute-claude");
 const claudeInteractiveButton = document.getElementById("claude-interactive");
 const claudeLoginButton = document.getElementById("claude-login");
 const refreshClaudeButton = document.getElementById("refresh-claude");
+const codexRuntimeStatus = document.getElementById("codex-runtime-status");
+const codexUsageStatus = document.getElementById("codex-usage-status");
+const codexActions = document.getElementById("codex-actions");
+const executeCodexButton = document.getElementById("execute-codex");
+const codexInteractiveButton = document.getElementById("codex-interactive");
+const codexLoginButton = document.getElementById("codex-login");
+const refreshCodexButton = document.getElementById("refresh-codex");
 let latestUsageSnapshot;
 let claudeAvailable = false;
 let claudeInstalled = false;
+let codexAvailable = false;
+let codexInstalled = false;
 let currentExecutionRuntime = "opencode";
 
 profileInput.value = document.body.dataset.defaultProfile || "balanced";
@@ -34,6 +43,7 @@ analyzeButton.addEventListener("click", () => {
   status.textContent = "Analizando complejidad, costo relativo y capacidad…";
   decisionPanel.classList.add("hidden");
   claudeActions.classList.add("hidden");
+  codexActions.classList.add("hidden");
   executionPanel.classList.add("hidden");
   executionOutput.replaceChildren();
   vscode.postMessage({
@@ -47,7 +57,9 @@ executeButton.addEventListener("click", () => {
   currentExecutionRuntime = "opencode";
   executeButton.disabled = true;
   executeClaudeButton.disabled = true;
+  executeCodexButton.disabled = true;
   claudeInteractiveButton.disabled = true;
+  codexInteractiveButton.disabled = true;
   executionPanel.classList.remove("hidden");
   analyzeButton.disabled = true;
   executionOutput.replaceChildren();
@@ -60,7 +72,9 @@ executeClaudeButton.addEventListener("click", () => {
   currentExecutionRuntime = "claude-code";
   executeButton.disabled = true;
   executeClaudeButton.disabled = true;
+  executeCodexButton.disabled = true;
   interactiveFallbackButton.disabled = true;
+  codexInteractiveButton.disabled = true;
   executionPanel.classList.remove("hidden");
   analyzeButton.disabled = true;
   executionOutput.replaceChildren();
@@ -71,9 +85,40 @@ executeClaudeButton.addEventListener("click", () => {
 
 claudeInteractiveButton.addEventListener("click", () => {
   claudeInteractiveButton.disabled = true;
+  executeButton.disabled = true;
+  executeClaudeButton.disabled = true;
+  executeCodexButton.disabled = true;
+  analyzeButton.disabled = true;
   executionPanel.classList.remove("hidden");
   executionStatus.textContent = "Abriendo Claude Code en una terminal interactiva…";
   vscode.postMessage({ type: "claudeInteractive" });
+});
+
+executeCodexButton.addEventListener("click", () => {
+  currentExecutionRuntime = "codex";
+  executeButton.disabled = true;
+  executeClaudeButton.disabled = true;
+  executeCodexButton.disabled = true;
+  interactiveFallbackButton.disabled = true;
+  claudeInteractiveButton.disabled = true;
+  codexInteractiveButton.disabled = true;
+  executionPanel.classList.remove("hidden");
+  analyzeButton.disabled = true;
+  executionOutput.replaceChildren();
+  executionStatus.textContent = "Iniciando Codex con la autenticación oficial…";
+  cancelExecutionButton.disabled = false;
+  vscode.postMessage({ type: "executeCodex" });
+});
+
+codexInteractiveButton.addEventListener("click", () => {
+  codexInteractiveButton.disabled = true;
+  executeButton.disabled = true;
+  executeClaudeButton.disabled = true;
+  executeCodexButton.disabled = true;
+  analyzeButton.disabled = true;
+  executionPanel.classList.remove("hidden");
+  executionStatus.textContent = "Abriendo Codex interactivo…";
+  vscode.postMessage({ type: "codexInteractive" });
 });
 
 claudeLoginButton.addEventListener("click", () => {
@@ -81,10 +126,21 @@ claudeLoginButton.addEventListener("click", () => {
   vscode.postMessage({ type: "claudeLogin" });
 });
 
+codexLoginButton.addEventListener("click", () => {
+  codexLoginButton.disabled = true;
+  vscode.postMessage({ type: "codexLogin" });
+});
+
 refreshClaudeButton.addEventListener("click", () => {
   refreshClaudeButton.disabled = true;
   claudeRuntimeStatus.textContent = "Consultando Claude Code…";
   vscode.postMessage({ type: "refreshClaude" });
+});
+
+refreshCodexButton.addEventListener("click", () => {
+  refreshCodexButton.disabled = true;
+  codexRuntimeStatus.textContent = "Consultando Codex CLI…";
+  vscode.postMessage({ type: "refreshCodex" });
 });
 
 interactiveFallbackButton.addEventListener("click", () => {
@@ -165,6 +221,34 @@ window.addEventListener("message", ({ data }) => {
     return;
   }
 
+  if (data.type === "codexRuntime") {
+    const runtime = data.inventory.runtime;
+    codexAvailable = runtime.availability === "available";
+    codexInstalled = runtime.installed === true;
+    refreshCodexButton.disabled = false;
+    codexLoginButton.disabled = !codexInstalled;
+    codexRuntimeStatus.textContent = runtime.message || (codexAvailable
+      ? "Codex está listo."
+      : "Codex no está disponible.");
+    const canExecute = codexAvailable && !decisionPanel.classList.contains("hidden");
+    executeCodexButton.disabled = !canExecute;
+    codexInteractiveButton.disabled = !canExecute;
+    return;
+  }
+
+  if (data.type === "codexUsage") {
+    codexUsageStatus.textContent = data.snapshot.status === "available"
+      ? "Uso oficial disponible; consultar las ventanas reportadas."
+      : "Uso: Not available · Codex CLI no expone un porcentaje restante exacto.";
+    return;
+  }
+
+  if (data.type === "codexLoginOpened") {
+    codexLoginButton.disabled = false;
+    codexRuntimeStatus.textContent = "Login abierto. Elegí ‘Sign in with ChatGPT’ para usar la suscripción, no API key.";
+    return;
+  }
+
   if (data.type === "executionEvent") {
     renderExecutionEvent(data.event);
     return;
@@ -172,13 +256,17 @@ window.addEventListener("message", ({ data }) => {
 
   if (data.type === "executionResult") {
     const result = data.result;
-    const runtimeName = data.runtimeId === "claude-code" ? "Claude Code" : "OpenCode";
+    const runtimeName = data.runtimeId === "claude-code"
+      ? "Claude Code"
+      : data.runtimeId === "codex" ? "Codex" : "OpenCode";
     executeButton.disabled = false;
     analyzeButton.disabled = false;
     cancelExecutionButton.disabled = true;
     executeClaudeButton.disabled = !claudeAvailable;
     claudeInteractiveButton.disabled = !claudeAvailable;
-    interactiveFallbackButton.disabled = data.runtimeId === "claude-code";
+    executeCodexButton.disabled = !codexAvailable;
+    codexInteractiveButton.disabled = !codexAvailable;
+    interactiveFallbackButton.disabled = data.runtimeId !== "opencode";
     if (result.status === "succeeded") {
       executionStatus.textContent = `${runtimeName} terminó correctamente.`;
     } else if (result.status === "cancelled") {
@@ -187,28 +275,43 @@ window.addEventListener("message", ({ data }) => {
       executionStatus.textContent = result.error || `${runtimeName} terminó con un error.`;
     }
     if (result.runtimeUnavailable) {
-      claudeAvailable = false;
-      executeClaudeButton.disabled = true;
-      claudeInteractiveButton.disabled = true;
-      claudeRuntimeStatus.textContent = "Claude Code quedó temporalmente no disponible por autenticación o cuota.";
+      if (data.runtimeId === "claude-code") {
+        claudeAvailable = false;
+        executeClaudeButton.disabled = true;
+        claudeInteractiveButton.disabled = true;
+        claudeRuntimeStatus.textContent = "Claude Code quedó temporalmente no disponible por autenticación o cuota.";
+      }
+      if (data.runtimeId === "codex") {
+        codexAvailable = false;
+        executeCodexButton.disabled = true;
+        codexInteractiveButton.disabled = true;
+        codexRuntimeStatus.textContent = "Codex quedó temporalmente no disponible por autenticación o cuota.";
+      }
     }
     return;
   }
 
   if (data.type === "executionError") {
-    const isClaude = data.runtimeId === "claude-code";
     executeButton.disabled = false;
     analyzeButton.disabled = false;
     cancelExecutionButton.disabled = true;
     executeClaudeButton.disabled = !claudeAvailable;
     claudeInteractiveButton.disabled = !claudeAvailable;
+    executeCodexButton.disabled = !codexAvailable;
+    codexInteractiveButton.disabled = !codexAvailable;
     claudeLoginButton.disabled = !claudeInstalled;
-    interactiveFallbackButton.disabled = isClaude;
+    codexLoginButton.disabled = !codexInstalled;
+    interactiveFallbackButton.disabled = data.runtimeId !== "opencode";
     executionStatus.textContent = data.message;
     return;
   }
 
   if (data.type === "interactiveFallbackOpened") {
+    executeButton.disabled = false;
+    executeClaudeButton.disabled = !claudeAvailable;
+    executeCodexButton.disabled = !codexAvailable;
+    claudeInteractiveButton.disabled = !claudeAvailable;
+    codexInteractiveButton.disabled = !codexAvailable;
     analyzeButton.disabled = false;
     interactiveFallbackButton.disabled = false;
     cancelExecutionButton.disabled = true;
@@ -217,11 +320,24 @@ window.addEventListener("message", ({ data }) => {
   }
 
   if (data.type === "claudeInteractiveOpened") {
+    executeButton.disabled = false;
+    executeCodexButton.disabled = !codexAvailable;
     analyzeButton.disabled = false;
     executeClaudeButton.disabled = !claudeAvailable;
     claudeInteractiveButton.disabled = !claudeAvailable;
     cancelExecutionButton.disabled = true;
     executionStatus.textContent = "Claude Code interactivo abierto. Las aprobaciones quedan bajo tu control.";
+    return;
+  }
+
+  if (data.type === "codexInteractiveOpened") {
+    executeButton.disabled = false;
+    executeClaudeButton.disabled = !claudeAvailable;
+    analyzeButton.disabled = false;
+    executeCodexButton.disabled = !codexAvailable;
+    codexInteractiveButton.disabled = !codexAvailable;
+    cancelExecutionButton.disabled = true;
+    executionStatus.textContent = "Codex interactivo abierto. Revisá las aprobaciones en la terminal.";
     return;
   }
 
@@ -265,6 +381,9 @@ window.addEventListener("message", ({ data }) => {
   claudeActions.classList.remove("hidden");
   executeClaudeButton.disabled = !claudeAvailable;
   claudeInteractiveButton.disabled = !claudeAvailable;
+  codexActions.classList.remove("hidden");
+  executeCodexButton.disabled = !codexAvailable;
+  codexInteractiveButton.disabled = !codexAvailable;
   decisionPanel.classList.remove("hidden");
 });
 
@@ -272,7 +391,7 @@ function renderExecutionEvent(event) {
   if (event.type === "started") {
     executionStatus.textContent = currentExecutionRuntime === "claude-code"
       ? "Claude Code está trabajando…"
-      : "OpenCode está trabajando…";
+      : currentExecutionRuntime === "codex" ? "Codex está trabajando…" : "OpenCode está trabajando…";
     return;
   }
   if (event.type === "text") {

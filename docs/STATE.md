@@ -22,7 +22,7 @@ Exact next action: in the Extension Development Host, complete official Claude C
 - M3 implementation commit: `feat: add Claude Code runtime`.
 - M3.5 adapter: integrated in the current working tree; no live Codex sign-in or Extension Development Host validation yet.
 - Build: passing.
-- Tests: 40 passing, including fake OpenCode/Claude/Codex process lifecycle, streaming, auth/quota, cancellation and credential redaction.
+- Tests: 41 passing, including fake OpenCode/Claude/Codex process lifecycle, streaming, auth/quota, cancellation and credential redaction.
 - npm audit: no known vulnerabilities after removing the optional publishing dependency.
 - Distribution: local only; Marketplace publishing is out of scope.
 
@@ -113,7 +113,7 @@ M2 validation on 2026-10-28: `npm run check`, `npm test` (19 tests), `node --che
 
 M3 validation on 2026-10-28: `npm run check`, `npm test` (29 tests), `node --check media/main.js` and `git diff --check` passed. Claude Code `2.1.312` installation verified with `claude --version`; no `claude auth status`, login, live request, or credential inspection was performed. Claude Pro sign-in and F5 validation remain pending.
 
-M3.5 implementation validation on 2026-10-28: `npm run check`, `npm test` (40 tests), `node --check media/main.js` and `git diff --check` passed. Codex CLI behavior is covered with fake processes; official references are OpenAI's [authentication](https://developers.openai.com/codex/auth), [non-interactive mode](https://developers.openai.com/codex/non-interactive-mode) and [`/usage` command](https://developers.openai.com/codex/developer-commands#view-account-usage-with-usage) docs. No live Codex auth status, login, execution or credential inspection was performed. Codex sign-in and combined F5 validation remain pending.
+M3.5 implementation validation on 2026-10-28: `npm run check`, `npm test` (41 tests), `node --check media/main.js` and `git diff --check` passed. Codex CLI behavior is covered with fake processes; official references are OpenAI's [authentication](https://developers.openai.com/codex/auth), [non-interactive mode](https://developers.openai.com/codex/non-interactive-mode) and [`/usage` command](https://developers.openai.com/codex/developer-commands#view-account-usage-with-usage) docs. No live Codex auth status, login, execution or credential inspection was performed. Codex sign-in and combined F5 validation remain pending.
 
 ## Session completion checklist
 
