@@ -6,11 +6,11 @@ This file is the compact handoff for the next human or coding-agent session.
 
 ## Current milestone
 
-M4.5 — Terminal-inspired fluorescent UI.
+M5 — Evaluation and outcome history.
 
-Status: M4 cross-runtime router is committed and M4.5 visual implementation is complete. Integral F5 validation for routing and M4.5 visual/accessibility states remains pending (2026-10-28).
+Status: M4.5 UI and M5 evaluation instrumentation are implemented. Integrated F5 validation, responsive visual checks and real evaluation outcome collection remain pending (2026-10-28).
 
-Exact next action: press `F5` and validate automatic cross-runtime selection, score/allowance explanation, manual override followed by review, route recalculation after usage refresh, runtime execution/cancellation, and the UI at narrow/wide widths and 200% zoom. Scoring remains an uncalibrated hypothesis until M5 evaluation.
+Exact next action: press `F5` and validate the full route/review/override/execute flow, OpenCode allowance refresh, verification controls and history, then check narrow/wide panels and 200% zoom. Run representative synthetic cases and mark verified outcomes; keep router weights unchanged until those measured outcomes support a change.
 
 ## Repository state
 
@@ -22,9 +22,10 @@ Exact next action: press `F5` and validate automatic cross-runtime selection, sc
 - M3 implementation commit: `feat: add Claude Code runtime`.
 - M3.5 adapter: integrated; user confirmed Codex ChatGPT sign-in and successful Codex execution smoke test. Claude Pro sign-in/execution smoke test also confirmed. User reports the combined M1.5/M2/M3/M3.5 Extension Development Host flow passed.
 - M4 implementation commit: `1640cea feat: add adaptive cross-runtime routing`.
-- M4.5 visual implementation is in the current working tree; integral F5 and responsive/accessibility checks are pending.
+- M4.5 visual implementation commit: `b3dee8a feat: apply terminal-inspired UI system`.
+- M5 synthetic evaluation set and local, prompt-free outcome history are implemented in the current working tree; no real outcome data has been collected yet.
 - Build/typecheck: passing (`npm run check`).
-- Tests: 58 passing, including cross-runtime scoring and four webview regression tests for keyboard analysis, route review, execution states and design/accessibility tokens.
+- Tests: 63 passing, including cross-runtime scoring, webview regression and evaluation-history privacy/retention tests.
 - npm audit: no known vulnerabilities after removing the optional publishing dependency.
 - Distribution: local only; Marketplace publishing is out of scope.
 
@@ -48,6 +49,7 @@ Exact next action: press `F5` and validate automatic cross-runtime selection, sc
 - Codex CLI discovery uses `codex login status`; execution streams official JSONL events with workspace-write sandboxing and on-request approvals. API-key environment overrides are removed and ChatGPT/API usage pools are kept distinct.
 - Codex CLI 0.165.0 installed from OpenAI's official standalone installer; `codex --version` verified. User confirmed ChatGPT sign-in and successful live Codex execution.
 - Codex auth/quota failures temporarily disable the runtime. Codex usage is `Not available` because the official `/usage` command reports token activity, not an exact remaining percentage.
+- The panel offers 20 synthetic evaluation cases and stores local outcome records capped at 100 entries. Records include route, runtime/model, latency, officially reported token usage, reported retries and manual verification, but never the raw prompt or payment data.
 - The CLI is never launched with `--auto`.
 - The project can be installed locally with `npm run install:local`.
 
@@ -55,8 +57,8 @@ Exact next action: press `F5` and validate automatic cross-runtime selection, sc
 
 - The current heuristic does not prove that it chooses the best model.
 - Runtime auth is checked through official CLIs, but model reachability is not independently validated; exact remaining usage is available only where an official provider surface reports it.
-- M4's new automatic-routing, score display, manual override/review and quota-refresh flows still need F5 validation.
-- M4.5 responsive layout and visual contrast/focus behavior still need manual Extension Development Host validation at narrow/wide widths and 200% zoom.
+- M4/M4.5 integrated route, allowance-refresh, override, execution and responsive/accessibility flows still need F5 validation.
+- No real M5 outcomes have been collected; synthetic routing scores alone are not evidence to recalibrate weights.
 - The scoring matrix is an initial hypothesis and does not prove optimal model choice; M5 evaluation is not implemented.
 - Historical usage, latency and task outcomes are not recorded.
 - Automatic fallback and multi-agent execution do not exist.
@@ -124,7 +126,9 @@ M3.5 validation on 2026-10-28: `npm run check`, `npm test` (41 tests), `node --c
 
 M4 implementation validation on 2026-10-28: `npm run check`, `npm test` (54 tests), `node --check media/main.js` and `git diff --check` passed. Router tests cover deterministic cross-runtime scoring, score explanations, profiles, expiry, isolated allowance pools, limited flags and unknown/stale/malformed official usage. User-confirmed F5 validation for M4's earlier routing UI is pending; routing weights remain uncalibrated until M5.
 
-M4.5 implementation validation on 2026-10-28: `npm run check`, `npm test` (58 tests), `node --check media/main.js` and `git diff --check` passed. Four webview regression tests cover Cmd/Ctrl+Enter, route/pool/score/alternative rendering, stream/cancel/approval/error states, AA token contrast, focus, reduced motion and narrow-layout rules. Manual Extension Development Host validation at narrow/wide widths and 200% zoom remains pending.
+M4.5 implementation validation on 2026-10-28: `npm run check`, `npm test` (58 tests), `node --check media/main.js` and `git diff --check` passed. Webview regression tests cover Cmd/Ctrl+Enter, route/pool/score/alternative rendering, stream/cancel/approval/error states, AA token contrast, focus, reduced motion and narrow-layout rules. Manual Extension Development Host validation at narrow/wide widths and 200% zoom remains pending.
+
+M5 implementation validation on 2026-10-28: `npm run check`, `npm test` (63 tests), `node --check media/main.js` and `git diff --check` passed. The 20-case synthetic set is stratified 5/10/5; local history is capped at 100 and tested to reject prompt-bearing records. Codex/Claude token counts are captured only when their official execution stream reports them; other usage and unreported retries remain unknown. No router weights were recalibrated.
 
 ## Session completion checklist
 

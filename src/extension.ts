@@ -1,10 +1,21 @@
 import * as vscode from "vscode";
+import { randomUUID } from "node:crypto";
 import {
   ClaudeCodeAdapter,
   launchClaudeCodeInteractive,
   launchClaudeCodeLogin,
 } from "./claude-code";
 import { CodexAdapter } from "./codex";
+import {
+  appendEvaluationRecord,
+  createEvaluationRecord,
+  EVALUATION_HISTORY_KEY,
+  evaluationCases,
+  EvaluationRecord,
+  loadEvaluationHistory,
+  updateVerificationOutcome,
+  VerificationOutcome,
+} from "./evaluation";
 import {
   launchOpenCodeInteractive,
   OpenCodeAdapter,
@@ -16,13 +27,14 @@ import {
   RoutingDecision,
   RoutingProfile,
   RuntimeExecutionEvent,
+  RuntimeExecutionResult,
   RuntimeInventory,
   RuntimeModel,
   UsageSnapshot,
 } from "./types";
 
 export function activate(context: vscode.ExtensionContext): void {
-  const provider = new ChePromptViewProvider(context.extensionUri);
+  const provider = new ChePromptViewProvider(context.extensionUri, context.globalState);
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider("cheprompt.sidebar", provider),
@@ -45,12 +57,20 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
   private claudeInventory?: RuntimeInventory;
   private codexAdapter?: CodexAdapter;
   private codexInventory?: RuntimeInventory;
+  private evaluationHistory: EvaluationRecord[];
   private activeExecution?: RuntimeExecutionHandle;
   private activeRuntime: "opencode" | "claude-code" | "codex" = "opencode";
   private lastExecutionRuntime: "opencode" | "claude-code" | "codex" = "opencode";
   private lastExecutionSessionId?: string;
 
-  constructor(private readonly extensionUri: vscode.Uri) {}
+  constructor(
+    private readonly extensionUri: vscode.Uri,
+    private readonly globalState: vscode.Memento,
+  ) {
+    this.evaluationHistory = loadEvaluationHistory(
+      globalState.get<unknown>(EVALUATION_HISTORY_KEY, []),
+    );
+  }
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
@@ -67,6 +87,20 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
 
     view.webview.onDidReceiveMessage(async (message: unknown) => {
       if (!isWebviewMessage(message)) {
+        return;
+      }
+
+      if (message.type === "webviewReady") {
+        await view.webview.postMessage({
+          type: "evaluationState",
+          cases: evaluationCases,
+          records: this.evaluationHistory,
+        });
+        return;
+      }
+
+      if (message.type === "verificationOutcome") {
+        await this.setVerificationOutcome(view.webview, message);
         return;
       }
 
@@ -268,6 +302,51 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
     ];
   }
 
+  private async setVerificationOutcome(
+    webview: vscode.Webview,
+    message: VerificationOutcomeMessage,
+  ): Promise<void> {
+    if (!this.evaluationHistory.some((record) => record.id === message.recordId)) {
+      await webview.postMessage({ type: "error", message: "No encontramos ese registro local de evaluación." });
+      return;
+    }
+    this.evaluationHistory = updateVerificationOutcome(
+      this.evaluationHistory,
+      message.recordId,
+      message.outcome,
+    );
+    try {
+      await this.globalState.update(EVALUATION_HISTORY_KEY, this.evaluationHistory);
+    } catch {
+      await webview.postMessage({
+        type: "error",
+        message: "No se pudo guardar la verificación en el historial local.",
+      });
+    }
+    await webview.postMessage({
+      type: "evaluationHistory",
+      records: this.evaluationHistory,
+      updatedRecordId: message.recordId,
+      verificationOutcome: message.outcome,
+    });
+  }
+
+  private async saveEvaluationRecord(
+    decision: RoutingDecision,
+    result: RuntimeExecutionResult,
+    startedAt: number,
+    prompt: string,
+  ): Promise<EvaluationRecord> {
+    const record = createEvaluationRecord(prompt, decision, result, startedAt);
+    this.evaluationHistory = appendEvaluationRecord(this.evaluationHistory, record);
+    try {
+      await this.globalState.update(EVALUATION_HISTORY_KEY, this.evaluationHistory);
+    } catch {
+      // Keep this session's record visible even if VS Code's local state store fails.
+    }
+    return record;
+  }
+
   private async refreshDecisionForCurrentPrompt(webview: vscode.Webview): Promise<void> {
     if (!this.lastPrompt || !this.lastDecision || this.activeExecution) return;
 
@@ -464,6 +543,10 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
+    const prompt = this.lastPrompt;
+    const decision = this.lastDecision;
+    const startedAt = Date.now();
+
     if (runtime === "claude-code" && this.claudeInventory?.runtime.availability !== "available") {
       void webview.postMessage({
         type: "executionError",
@@ -490,14 +573,14 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
       const execution = runtime === "opencode"
         ? new OpenCodeExecutionAdapter(
             vscode.workspace.getConfiguration("cheprompt").get<string>("opencodePath", "opencode"),
-          ).start(this.lastPrompt, this.lastDecision, cwd, onEvent)
+          ).start(prompt, decision, cwd, onEvent)
         : runtime === "claude-code"
-          ? this.claudeAdapter!.start(this.lastPrompt, cwd, onEvent)
+          ? this.claudeAdapter!.start(prompt, cwd, onEvent)
           : this.codexAdapter!.start(
-              this.lastPrompt,
-              this.lastDecision.selected.runtimeId === "codex"
-                ? this.lastDecision
-                : { ...this.lastDecision, selected: this.codexInventory!.models[0] },
+              prompt,
+              decision.selected.runtimeId === "codex"
+                ? decision
+                : { ...decision, selected: this.codexInventory!.models[0] },
               cwd,
               onEvent,
             );
@@ -507,7 +590,13 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
       void execution.result.then(async (result) => {
         if (result.sessionId) this.lastExecutionSessionId = result.sessionId;
         if (this.activeExecution === execution) this.activeExecution = undefined;
-        await webview.postMessage({ type: "executionResult", result, runtimeId: runtime });
+        const evaluationRecord = await this.saveEvaluationRecord(decision, result, startedAt, prompt);
+        await webview.postMessage({
+          type: "executionResult",
+          result,
+          runtimeId: runtime,
+          evaluationRecordId: evaluationRecord.id,
+        });
         if (runtime === "claude-code" && result.runtimeUnavailable && this.claudeAdapter) {
           this.claudeInventory = await this.claudeAdapter.getInventory();
           await webview.postMessage({ type: "claudeRuntime", inventory: this.claudeInventory });
@@ -522,18 +611,37 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         }
       }).catch(async (error: unknown) => {
         if (this.activeExecution === execution) this.activeExecution = undefined;
+        const failedResult: RuntimeExecutionResult = {
+          executionId: execution.executionId,
+          status: "failed",
+          exitCode: -1,
+          error: "No se pudo completar la ejecución.",
+        };
+        const evaluationRecord = await this.saveEvaluationRecord(decision, failedResult, startedAt, prompt);
         await webview.postMessage({
-          type: "executionError",
+          type: "executionResult",
+          result: failedResult,
           runtimeId: runtime,
-          message: error instanceof Error ? error.message : "No se pudo completar la ejecución.",
+          evaluationRecordId: evaluationRecord.id,
         });
       });
     } catch (error) {
-      void webview.postMessage({
+      const failedResult: RuntimeExecutionResult = {
+        executionId: randomUUID(),
+        status: "failed",
+        exitCode: -1,
+        error: "No se pudo iniciar la ejecución.",
+      };
+      void this.saveEvaluationRecord(decision, failedResult, startedAt, prompt).then((evaluationRecord) => webview.postMessage({
+        type: "executionResult",
+        result: failedResult,
+        runtimeId: runtime,
+        evaluationRecordId: evaluationRecord.id,
+      })).catch(() => webview.postMessage({
         type: "executionError",
         runtimeId: runtime,
-        message: error instanceof Error ? error.message : "No se pudo iniciar OpenCode.",
-      });
+        message: "No se pudo iniciar la ejecución.",
+      }));
     }
   }
 
@@ -766,6 +874,16 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         <ul id="inventory-models"></ul>
       </details>
 
+      <details id="evaluation-dataset" class="inventory">
+        <summary>Evaluación manual · 20 tareas sintéticas</summary>
+        <p>Elegí una tarea de referencia. No se ejecuta sola; se manda únicamente al presionar Dale y luego ejecutar.</p>
+        <label for="evaluation-case">Tarea de evaluación</label>
+        <select id="evaluation-case">
+          <option value="">Seleccioná una tarea…</option>
+        </select>
+        <button id="load-evaluation-case" class="compact secondary" type="button">Usar en el composer</button>
+      </details>
+
       <section id="decision" class="decision hidden" aria-labelledby="decision-title">
         <div class="decision-heading">
           <span class="state-chip" data-state="selected">Elegido</span>
@@ -810,7 +928,22 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
           <button id="cancel-execution" class="secondary" type="button">Cancelar</button>
           <button id="interactive-fallback" class="secondary" type="button">Abrir terminal interactiva</button>
         </div>
+        <div id="verification-controls" class="verification hidden">
+          <h3>¿Pudiste verificar el resultado?</h3>
+          <p id="verification-status" role="status" aria-live="polite">El registro local no guarda el texto del prompt.</p>
+          <div class="verification-actions">
+            <button id="verification-passed" class="compact secondary" type="button">Verificado</button>
+            <button id="verification-failed" class="compact secondary" type="button">Falló la verificación</button>
+            <button id="verification-not-run" class="compact secondary" type="button">No lo probé</button>
+          </div>
+        </div>
       </section>
+
+      <details id="evaluation-history" class="inventory">
+        <summary>Historial local · sin prompts</summary>
+        <p id="evaluation-history-summary">Todavía no hay ejecuciones registradas.</p>
+        <ol id="evaluation-history-list"></ol>
+      </details>
     </main>
 
     <footer>Scoring local con hipótesis iniciales. Revisá la ruta y el cupo antes de ejecutar.</footer>
@@ -845,8 +978,16 @@ type OverrideCandidateMessage = {
   id: string;
   allowancePoolId: string;
 };
+type WebviewReadyMessage = { type: "webviewReady" };
+type VerificationOutcomeMessage = {
+  type: "verificationOutcome";
+  recordId: string;
+  outcome: VerificationOutcome;
+};
 
 function isWebviewMessage(value: unknown): value is
+  | WebviewReadyMessage
+  | VerificationOutcomeMessage
   | AnalyzeMessage
   | ExecuteMessage
   | RefreshUsageMessage
@@ -875,7 +1016,15 @@ function isWebviewMessage(value: unknown): value is
   ) {
     return true;
   }
+  if (
+    candidate.type === "verificationOutcome" &&
+    typeof candidate.recordId === "string" &&
+    ["unverified", "passed", "failed", "not-run"].includes(String(candidate.outcome))
+  ) {
+    return true;
+  }
   if ([
+    "webviewReady",
     "execute",
     "refreshUsage",
     "cancelExecution",

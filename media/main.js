@@ -12,6 +12,15 @@ const cancelExecutionButton = document.getElementById("cancel-execution");
 const decisionPanel = document.getElementById("decision");
 const overrideCandidateSelect = document.getElementById("override-candidate");
 const applyOverrideButton = document.getElementById("apply-override");
+const evaluationCaseSelect = document.getElementById("evaluation-case");
+const loadEvaluationCaseButton = document.getElementById("load-evaluation-case");
+const evaluationHistorySummary = document.getElementById("evaluation-history-summary");
+const evaluationHistoryList = document.getElementById("evaluation-history-list");
+const verificationControls = document.getElementById("verification-controls");
+const verificationStatus = document.getElementById("verification-status");
+const verificationPassedButton = document.getElementById("verification-passed");
+const verificationFailedButton = document.getElementById("verification-failed");
+const verificationNotRunButton = document.getElementById("verification-not-run");
 const status = document.getElementById("status");
 const inventoryStatus = document.getElementById("inventory-status");
 const inventoryModels = document.getElementById("inventory-models");
@@ -43,6 +52,8 @@ let codexAvailable = false;
 let codexInstalled = false;
 let currentExecutionRuntime = "opencode";
 let latestDecision;
+let currentEvaluationRecordId;
+const evaluationCasesById = new Map();
 
 profileInput.value = document.body.dataset.defaultProfile || "balanced";
 
@@ -62,6 +73,8 @@ analyzeButton.addEventListener("click", () => {
   claudeActions.classList.add("hidden");
   codexActions.classList.add("hidden");
   executionPanel.classList.add("hidden");
+  verificationControls.classList.add("hidden");
+  currentEvaluationRecordId = undefined;
   executionOutput.replaceChildren();
   vscode.postMessage({
     type: "analyze",
@@ -179,7 +192,50 @@ applyOverrideButton.addEventListener("click", () => {
   vscode.postMessage({ type: "overrideCandidate", ...candidate });
 });
 
+loadEvaluationCaseButton.addEventListener("click", () => {
+  const evaluationCase = evaluationCasesById.get(evaluationCaseSelect.value);
+  if (!evaluationCase) {
+    status.dataset.state = "warning";
+    status.textContent = "Elegí una tarea sintética de la lista.";
+    return;
+  }
+  promptInput.value = evaluationCase.prompt;
+  profileInput.value = evaluationCase.profile;
+  promptInput.focus();
+  status.dataset.state = "selected";
+  status.textContent = `Tarea “${evaluationCase.title}” cargada. Revisala y presioná Dale cuando quieras ejecutarla.`;
+});
+
+verificationPassedButton.addEventListener("click", () => sendVerificationOutcome("passed"));
+verificationFailedButton.addEventListener("click", () => sendVerificationOutcome("failed"));
+verificationNotRunButton.addEventListener("click", () => sendVerificationOutcome("not-run"));
+
 window.addEventListener("message", ({ data }) => {
+  if (data.type === "evaluationState") {
+    evaluationCasesById.clear();
+    const options = [document.createElement("option")];
+    options[0].value = "";
+    options[0].textContent = "Seleccioná una tarea…";
+    for (const evaluationCase of data.cases || []) {
+      evaluationCasesById.set(evaluationCase.id, evaluationCase);
+      const option = document.createElement("option");
+      option.value = evaluationCase.id;
+      option.textContent = `${evaluationCase.title} · ${evaluationCase.complexity}`;
+      options.push(option);
+    }
+    evaluationCaseSelect.replaceChildren(...options);
+    renderEvaluationHistory(data.records || []);
+    return;
+  }
+
+  if (data.type === "evaluationHistory") {
+    renderEvaluationHistory(data.records || []);
+    if (data.updatedRecordId === currentEvaluationRecordId) {
+      verificationStatus.textContent = `Verificación registrada: ${verificationLabel(data.verificationOutcome)}.`;
+    }
+    return;
+  }
+
   if (data.type === "inventoryError") {
     opencodeAvailable = false;
     inventoryStatus.textContent = data.message;
@@ -294,6 +350,11 @@ window.addEventListener("message", ({ data }) => {
 
   if (data.type === "executionResult") {
     const result = data.result;
+    currentEvaluationRecordId = data.evaluationRecordId;
+    if (currentEvaluationRecordId) {
+      verificationControls.classList.remove("hidden");
+      verificationStatus.textContent = "Marcá el resultado después de comprobarlo. El prompt no se guarda.";
+    }
     const runtimeName = data.runtimeId === "claude-code"
       ? "Claude Code"
       : data.runtimeId === "codex" ? "Codex" : "OpenCode";
@@ -571,4 +632,48 @@ setInterval(() => {
   if (latestUsageSnapshot) {
     renderUsageSnapshot(latestUsageSnapshot);
   }
-}, 30 * 1000);
+  }, 30 * 1000);
+
+vscode.postMessage({ type: "webviewReady" });
+
+function sendVerificationOutcome(outcome) {
+  if (!currentEvaluationRecordId) return;
+  vscode.postMessage({
+    type: "verificationOutcome",
+    recordId: currentEvaluationRecordId,
+    outcome,
+  });
+}
+
+function renderEvaluationHistory(records) {
+  const recent = [...records].slice(-8).reverse();
+  evaluationHistorySummary.textContent = records.length
+    ? `${records.length} ejecuciones guardadas localmente; sin prompts.`
+    : "Todavía no hay ejecuciones registradas. No se guarda el texto de tus prompts.";
+  evaluationHistoryList.replaceChildren(
+    ...recent.map((record) => {
+      const item = document.createElement("li");
+      const task = record.evaluationCaseTitle || `${record.complexity} · ${record.profile}`;
+      const tokens = record.inputTokens !== undefined || record.outputTokens !== undefined
+        ? `${record.inputTokens ?? "?"} entrada / ${record.outputTokens ?? "?"} salida`
+        : "uso de tokens no reportado";
+      const retryLabel = record.retries === null ? "reintentos no reportados" : `reintentos ${record.retries}`;
+      item.textContent = `${task} · ${record.modelLabel} · ${record.runtimeId}/${record.providerId} · ${record.executionStatus} · ${record.latencyMs} ms · ${tokens} · ${retryLabel} · verificación ${verificationLabel(record.verificationOutcome)}`;
+      const detail = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.textContent = "Motivo de la ruta";
+      const reason = document.createElement("p");
+      reason.textContent = record.routingReason;
+      detail.append(summary, reason);
+      item.append(detail);
+      return item;
+    }),
+  );
+}
+
+function verificationLabel(outcome) {
+  if (outcome === "passed") return "verificado";
+  if (outcome === "failed") return "falló";
+  if (outcome === "not-run") return "sin probar";
+  return "pendiente";
+}

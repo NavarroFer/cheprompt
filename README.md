@@ -19,6 +19,7 @@ Este repositorio contiene el MVP inicial:
 - opción explícita de ChatGPT/Codex mediante el CLI oficial de Codex;
 - confirmación explícita antes de ejecutar cualquiera de los runtimes;
 - pruebas unitarias para routing, inventario, uso oficial y adaptadores con procesos falsos.
+- conjunto sintético de 20 tareas e historial local de resultados, sin guardar prompts reales.
 
 La selección actual es una hipótesis medible, no una promesa de calidad. El siguiente paso es registrar resultados reales —tests, latencia, correcciones y consumo— y ajustar el router con evidencia.
 

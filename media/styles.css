@@ -542,6 +542,43 @@ li {
   margin-top: 8px;
 }
 
+.verification {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--cp-border);
+  border-radius: 6px;
+  background: var(--cp-surface-raised);
+}
+
+.verification h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.verification-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.verification-actions button {
+  margin: 0;
+}
+
+#evaluation-history-list {
+  padding-left: 20px;
+}
+
+#evaluation-history-list > li {
+  margin: 8px 0;
+  color: var(--cp-text);
+  overflow-wrap: anywhere;
+}
+
+#evaluation-history-list details {
+  margin-top: 3px;
+}
+
 #cancel-execution {
   border-color: var(--cp-danger);
   color: var(--cp-danger);

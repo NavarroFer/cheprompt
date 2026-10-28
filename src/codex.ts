@@ -6,6 +6,7 @@ import {
   StreamingProcessSpawner,
 } from "./opencode";
 import {
+  ExecutionUsageMetrics,
   ProviderDescriptor,
   RoutingDecision,
   RuntimeAdapter,
@@ -200,6 +201,7 @@ export class CodexAdapter implements RuntimeAdapter {
     let malformedOutput = false;
     let cancelled = false;
     let reportedError: string | undefined;
+    let usageMetrics: ExecutionUsageMetrics | undefined;
 
     const emit = (type: RuntimeExecutionEvent["type"], values: Partial<RuntimeExecutionEvent> = {}) => {
       onEvent({ executionId, type, timestamp: Date.now(), ...values });
@@ -251,6 +253,7 @@ export class CodexAdapter implements RuntimeAdapter {
         return;
       }
       if (value.type === "turn.completed") {
+        usageMetrics = parseCodexTokenUsage(value.usage);
         emit("step", { sessionId, message: "Codex completó la respuesta." });
         return;
       }
@@ -292,6 +295,7 @@ export class CodexAdapter implements RuntimeAdapter {
         exitCode: completion.exitCode,
         ...(sessionId ? { sessionId } : {}),
         ...(error ? { error } : {}),
+        ...(usageMetrics ? { usage: usageMetrics } : {}),
         ...(status === "failed" && this.unavailableUntil > Date.now() ? { runtimeUnavailable: true } : {}),
       };
       emit(cancelled ? "cancelled" : "completed", {
@@ -417,6 +421,22 @@ async function drain(stream: AsyncIterable<string>): Promise<void> {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseCodexTokenUsage(value: unknown): ExecutionUsageMetrics | undefined {
+  if (!isRecord(value)) return undefined;
+  const inputTokens = typeof value.input_tokens === "number" && Number.isSafeInteger(value.input_tokens) && value.input_tokens >= 0
+    ? value.input_tokens
+    : undefined;
+  const outputTokens = typeof value.output_tokens === "number" && Number.isSafeInteger(value.output_tokens) && value.output_tokens >= 0
+    ? value.output_tokens
+    : undefined;
+  if (inputTokens === undefined && outputTokens === undefined) return undefined;
+  return {
+    source: "Codex CLI JSONL turn.completed",
+    ...(inputTokens === undefined ? {} : { inputTokens }),
+    ...(outputTokens === undefined ? {} : { outputTokens }),
+  };
 }
 
 function isMissingExecutable(error: unknown): boolean {

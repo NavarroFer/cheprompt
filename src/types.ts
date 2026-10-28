@@ -98,6 +98,12 @@ export interface RuntimeExecutionEvent {
 
 export type RuntimeExecutionStatus = "succeeded" | "failed" | "cancelled";
 
+export interface ExecutionUsageMetrics {
+  source: string;
+  inputTokens?: number;
+  outputTokens?: number;
+}
+
 export interface RuntimeExecutionResult {
   executionId: string;
   status: RuntimeExecutionStatus;
@@ -105,6 +111,8 @@ export interface RuntimeExecutionResult {
   sessionId?: string;
   error?: string;
   runtimeUnavailable?: boolean;
+  usage?: ExecutionUsageMetrics;
+  retries?: number;
 }
 
 export interface RoutingScoreBreakdown {

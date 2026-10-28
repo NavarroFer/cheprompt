@@ -32,9 +32,11 @@ class FakeElement {
     this.children.splice(0, this.children.length, ...children);
   }
 
-  append(child: FakeElement): void {
-    this.children.push(child);
+  append(...children: FakeElement[]): void {
+    this.children.push(...children);
   }
+
+  focus(): void {}
 
   click(): void {
     this.listeners.get("click")?.({ preventDefault() {} });
@@ -226,6 +228,60 @@ test("execution status, streaming text and cancellation use accessible runtime c
     result: { status: "failed", error: "Codex informó un límite de uso." },
   });
   assert.equal(elements.get("execution-status")?.textContent, "Codex informó un límite de uso.");
+});
+
+test("synthetic evaluation tasks load locally and verification is recorded without prompt text", () => {
+  const { elements, messages, receive } = loadWebview();
+  const syntheticPrompt = "Tarea sintética de referencia, sin información de usuario.";
+  receive({
+    type: "evaluationState",
+    cases: [{ id: "case-01", title: "Prueba pequeña", complexity: "simple", profile: "economy", prompt: syntheticPrompt }],
+    records: [],
+  });
+  assert.equal(elements.get("evaluation-case")?.children.length, 2);
+  elements.get("evaluation-case")!.value = "case-01";
+  elements.get("load-evaluation-case")?.click();
+  assert.equal(elements.get("prompt")?.value, syntheticPrompt);
+  assert.equal(messages.at(-1)?.type, "webviewReady");
+
+  receive({
+    type: "executionResult",
+    runtimeId: "codex",
+    evaluationRecordId: "record-1",
+    result: { status: "succeeded" },
+  });
+  assert.equal(elements.get("verification-controls")?.classList.contains("hidden"), false);
+  elements.get("verification-passed")?.click();
+  assert.equal(messages.at(-1)?.type, "verificationOutcome");
+  assert.equal(messages.at(-1)?.recordId, "record-1");
+  assert.equal(messages.at(-1)?.outcome, "passed");
+
+  receive({
+    type: "evaluationHistory",
+    records: [{
+      id: "record-1",
+      recordedAt: "2026-10-28T00:00:00.000Z",
+      evaluationCaseTitle: "Prueba pequeña",
+      complexity: "simple",
+      profile: "economy",
+      runtimeId: "codex",
+      providerId: "chatgpt-codex",
+      modelId: "codex-default",
+      modelLabel: "Codex",
+      allowancePoolId: "chatgpt-codex",
+      routingReason: "Ruta de prueba.",
+      routingScore: 90,
+      executionStatus: "succeeded",
+      latencyMs: 1200,
+      retries: null,
+      verificationOutcome: "passed",
+    }],
+    updatedRecordId: "record-1",
+    verificationOutcome: "passed",
+  });
+  assert.match(elements.get("evaluation-history-list")?.children[0]?.textContent ?? "", /Prueba pequeña/);
+  assert.equal(elements.get("verification-status")?.textContent, "Verificación registrada: verificado.");
+  assert.equal(elements.get("evaluation-history-list")?.children[0]?.textContent.includes(syntheticPrompt), false);
 });
 
 test("fluorescent theme has visible focus, reduced-motion and narrow-layout rules", () => {

@@ -22,8 +22,8 @@ The router optimizes expected successful completion, not the cheapest first call
 
 - **Completed:** M0 foundation.
 - **Completed:** M1 runtime inventory and stable contracts.
-- **Now:** M4.5 terminal-inspired UI implementation complete; integral Extension Development Host validation pending for M4 and M4.5.
-- **Next:** Validate routing, allowance refresh, override, execution and responsive/accessibility states with `F5`; then begin M5 evaluation.
+- **Now:** M5 evaluation set and local outcome-history instrumentation implemented; F5 and real outcome collection pending.
+- **Next:** Validate the integrated M4/M4.5/M5 flow with `F5`, collect verified outcomes from the synthetic set, then assess routing by complexity and runtime before any recalibration.
 - **Later:** Evaluation-driven learning, automatic fallback and parallel agents.
 
 ## Now
@@ -204,12 +204,17 @@ Limitations: manual F5 validation is still needed for the combined automatic rou
 
 ### M5 — Evaluation and outcome history
 
-**Status:** Not started
+**Status:** Evaluation set and local outcome-history instrumentation implemented; Extension Development Host validation and real outcome collection pending (2026-10-28)
 
-- Build a 20-task representative evaluation set.
-- Record model, routing reason, latency, usage, retries and verification outcome.
-- Do not store raw prompts by default.
-- Recalibrate weights only from measured results.
+- [x] Build a 20-task synthetic evaluation set stratified across simple, standard and complex tasks.
+- [x] Record selected runtime/model, allowance pool, routing reason, score, latency, reported token usage, CLI-reported retries and execution status.
+- [x] Capture a user-marked verification outcome without retaining raw production prompts.
+- [x] Keep history local and bounded; retain no payment data and no raw prompts.
+- [x] Keep routing weights unchanged until verified outcomes provide evidence for recalibration.
+
+Result: A 20-case synthetic set (5 simple, 10 standard, 5 complex) can be loaded manually from the panel. Each completed execution creates a local history record with route metadata, latency, token counts only when the official CLI reports them, retries only when reported, execution result and a user-entered verification outcome. History is capped at 100 records and never stores the submitted prompt. No automatic provider calls or LLM judge are used by the benchmark.
+
+Limitations: there are no real evaluation outcomes yet. The user must run representative cases and mark their verification results in Extension Development Host; do not recalibrate the router from the synthetic set's routing scores alone.
 
 ### M6 — Escalation and fallback
 

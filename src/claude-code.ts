@@ -7,6 +7,7 @@ import {
   StreamingProcessSpawner,
 } from "./opencode";
 import {
+  ExecutionUsageMetrics,
   ProviderDescriptor,
   RuntimeAdapter,
   RuntimeAvailability,
@@ -153,6 +154,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     let authOrQuotaFailure = false;
     let cancelled = false;
     let emittedText = false;
+    let retryCount = 0;
+    let usageMetrics: ExecutionUsageMetrics | undefined;
 
     const emit = (type: RuntimeExecutionEvent["type"], values: Partial<RuntimeExecutionEvent> = {}) => {
       onEvent({ executionId, type, timestamp: Date.now(), ...values });
@@ -201,6 +204,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         return;
       }
       if (message.type === "system" && message.subtype === "api_retry") {
+        retryCount += 1;
         const category = typeof message.error === "string" ? message.error : "";
         if (isAuthOrQuotaFailure(category)) authOrQuotaFailure = true;
         emit("diagnostic", {
@@ -217,6 +221,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         return;
       }
       if (message.type === "result") {
+        usageMetrics = parseClaudeTokenUsage(message.usage);
         if (message.is_error === true) {
           reportedError = typeof message.result === "string" ? message.result : "Claude Code informó un error.";
           authOrQuotaFailure ||= isAuthOrQuotaFailure(reportedError);
@@ -270,6 +275,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         exitCode: completion.exitCode,
         ...(sessionId ? { sessionId } : {}),
         ...(error ? { error: safeClaudeError(error) } : {}),
+        ...(usageMetrics ? { usage: usageMetrics } : {}),
+        retries: retryCount,
         ...(status === "failed" && authOrQuotaFailure ? { runtimeUnavailable: true } : {}),
       };
       emit(cancelled ? "cancelled" : "completed", {
@@ -374,4 +381,20 @@ function isMissingExecutable(error: unknown): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseClaudeTokenUsage(value: unknown): ExecutionUsageMetrics | undefined {
+  if (!isRecord(value)) return undefined;
+  const inputTokens = typeof value.input_tokens === "number" && Number.isSafeInteger(value.input_tokens) && value.input_tokens >= 0
+    ? value.input_tokens
+    : undefined;
+  const outputTokens = typeof value.output_tokens === "number" && Number.isSafeInteger(value.output_tokens) && value.output_tokens >= 0
+    ? value.output_tokens
+    : undefined;
+  if (inputTokens === undefined && outputTokens === undefined) return undefined;
+  return {
+    source: "Claude Code stream-json result",
+    ...(inputTokens === undefined ? {} : { inputTokens }),
+    ...(outputTokens === undefined ? {} : { outputTokens }),
+  };
 }

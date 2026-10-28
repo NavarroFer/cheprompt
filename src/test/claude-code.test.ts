@@ -149,7 +149,13 @@ test("streams official Claude JSON events through the shared execution contract"
       type: "stream_event",
       event: { type: "content_block_delta", delta: { type: "text_delta", text: "Hola" } },
     })}\n`,
-    `${JSON.stringify({ type: "result", subtype: "success", result: "Hola", session_id: "claude-session" })}\n`,
+    `${JSON.stringify({
+      type: "result",
+      subtype: "success",
+      result: "Hola",
+      usage: { input_tokens: 120, output_tokens: 16 },
+      session_id: "claude-session",
+    })}\n`,
   ], 0);
   const spawner = new FakeSpawner(process);
   const events: RuntimeExecutionEvent[] = [];
@@ -159,6 +165,12 @@ test("streams official Claude JSON events through the shared execution contract"
 
   assert.equal(result.status, "succeeded");
   assert.equal(result.sessionId, "claude-session");
+  assert.deepEqual(result.usage, {
+    source: "Claude Code stream-json result",
+    inputTokens: 120,
+    outputTokens: 16,
+  });
+  assert.equal(result.retries, 0);
   assert.equal(spawner.cwd, "/workspace");
   assert.ok(spawner.args?.includes("--output-format"));
   assert.ok(spawner.args?.includes("stream-json"));
@@ -191,6 +203,7 @@ test("marks Claude Code temporarily unavailable after an official rate-limit fai
 
   assert.equal(result.status, "failed");
   assert.equal(result.runtimeUnavailable, true);
+  assert.equal(result.retries, 1);
   assert.equal(inventory.runtime.availability, "unavailable");
   assert.match(inventory.runtime.message ?? "", /temporal/);
 });

@@ -211,6 +211,11 @@ test("exec streams documented JSONL events and uses only workspace-write/on-requ
 
   assert.equal(result.status, "succeeded");
   assert.equal(result.sessionId, "thread-123");
+  assert.deepEqual(result.usage, {
+    source: "Codex CLI JSONL turn.completed",
+    inputTokens: 10,
+    outputTokens: 5,
+  });
   assert.equal(spawner.cwd, "/workspace");
   assert.equal(spawner.env?.OPENAI_API_KEY, undefined);
   assert.equal(spawner.env?.CODEX_API_KEY, undefined);
