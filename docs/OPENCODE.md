@@ -25,7 +25,7 @@ Current Go limits and model availability can change. Check the official guide be
 - Run all validation before updating milestone status.
 - Update the continuity documents before committing.
 
-## Prompt for M1
+## Prompt for M1 (completed)
 
 Copy this entire prompt into OpenCode:
 
@@ -62,6 +62,46 @@ Before finishing:
 - Report files changed, tests run and any blockers.
 ```
 
+## Prompt for M1.5
+
+Copy this entire prompt into OpenCode:
+
+```text
+Implement ChePrompt milestone M1.5: Provider-reported usage visibility.
+
+Before changing anything:
+1. Read AGENTS.md, README.md, docs/ROADMAP.md, docs/STATE.md and the existing adapter/tests completely.
+2. Run git status --short, npm run check and npm test.
+3. Restate the M1.5 acceptance criteria and propose a concise plan.
+4. Do not work on M2 or later milestones.
+
+Implementation requirements:
+- Extend RuntimeAdapter with an optional usage-limit capability without coupling it to VS Code APIs.
+- Add typed usage snapshots containing runtime ID, provider, window label, remaining percentage, reset time, source, observedAt and freshness.
+- Implement OpenCode Go usage discovery using the official `/api/experimental/usage/limits` endpoint.
+- Verify from the official response/docs whether each raw `percent` means used or remaining before converting it to `remainingPercent`; never guess the direction.
+- Preserve rolling, weekly and monthly windows separately when present.
+- Keep authentication in the official OpenCode store. Never log, persist or render raw tokens.
+- Fetch through an injected interface so tests never call the network or real accounts.
+- Show percentage, reset time, source and last refresh in the ChePrompt panel.
+- Show `Not available` for runtimes without an official percentage. Do not estimate it, scrape dashboards or call private endpoints.
+- Treat unsupported, stale and malformed data as unknown, not as zero allowance.
+- Do not change routing scores yet; quota-aware routing belongs to M4.
+- Preserve explicit review and execution confirmation.
+
+Validation requirements:
+- Run npm run check.
+- Run npm test.
+- Add focused tests for exact multi-window usage, raw percentage normalization, unsupported usage, stale snapshots and malformed responses.
+- Manually validate the panel with F5 and document the observed states.
+
+Before finishing:
+- Update docs/ROADMAP.md and docs/STATE.md with the real result, limitations and exact next action.
+- Show git diff --stat and git status --short.
+- Create one atomic commit named: feat: show provider usage limits
+- Report files changed, tests run, manual validation and blockers.
+```
+
 ## If the session runs out of context or quota
 
 Start a fresh OpenCode session and send:
@@ -80,7 +120,7 @@ Use a stronger review here when:
 - The milestone requires changing the roadmap.
 - You want a security or privacy review before storing run history.
 
-## Expected handoff after M1
+## Expected handoff after the current milestone
 
 Bring back:
 

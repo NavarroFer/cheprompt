@@ -12,8 +12,8 @@ The router optimizes expected successful completion, not the cheapest first call
 
 - **Completed:** M0 foundation.
 - **Completed:** M1 runtime inventory and stable contracts.
-- **Now:** M2 unified execution inside ChePrompt.
-- **Next:** Claude Code and adaptive routing.
+- **Now:** M1.5 provider-reported usage visibility.
+- **Next:** unified execution, Claude Code, ChatGPT/Codex and adaptive routing.
 - **Later:** evaluation-driven learning, automatic fallback and parallel agents.
 
 ## Now
@@ -54,6 +54,30 @@ Dependencies:
 - OpenCode v2 installed and authenticated.
 - No Claude Code dependency yet; its adapter is M3.
 
+### M1.5 — Provider-reported usage visibility
+
+**Status:** Not started
+
+Outcome: ChePrompt shows the exact remaining allowance and reset windows when an official provider surface exposes them, without presenting guesses as account data.
+
+Definition of done:
+
+- [ ] Add an optional `getUsageLimits()` capability to `RuntimeAdapter`.
+- [ ] Represent usage window, remaining percentage, reset time, source, observation time and freshness in typed contracts.
+- [ ] Implement OpenCode Go usage discovery through its official experimental usage-limits endpoint.
+- [ ] Confirm the endpoint's percentage semantics before normalizing to `remainingPercent`; do not infer whether a raw percentage means used or remaining.
+- [ ] Show every reported window separately, including rolling, weekly and monthly meters when present.
+- [ ] Display the data source and last refresh time next to each percentage.
+- [ ] Display `Not available` when a runtime does not officially expose a percentage; do not estimate it or scrape dashboards.
+- [ ] Treat missing, stale or malformed usage data as unknown, never as zero allowance.
+- [ ] Add offline unit tests for exact windows, unsupported usage, stale data and malformed responses.
+- [ ] Preserve the existing routing and explicit execution confirmation; quota-aware scoring belongs to M4.
+
+Dependencies:
+
+- OpenCode's `/api/experimental/usage/limits` contract is experimental and must fail gracefully if it changes.
+- Provider credentials remain in official stores and must never be logged or rendered.
+
 ## Next
 
 ### M2 — Unified execution inside ChePrompt
@@ -82,7 +106,22 @@ Definition of done:
 - [ ] Implement `ClaudeCodeAdapter` without copying Claude credentials into ChePrompt.
 - [ ] Detect quota/auth failures and mark the runtime temporarily unavailable.
 - [ ] Stream execution through the same M2 event contract.
+- [ ] Include an exact remaining allowance only if an official Claude CLI/API surface exposes it; otherwise show `Not available`.
 - [ ] Document that Claude Pro credentials must not be reused through OpenCode plugins.
+
+### M3.5 — ChatGPT/Codex runtime
+
+**Status:** Not started
+
+Outcome: ChePrompt can select the user's officially authenticated OpenAI coding runtime without copying account credentials.
+
+Definition of done:
+
+- [ ] Identify and document the supported official CLI/API integration for the user's ChatGPT/Codex subscription.
+- [ ] Implement an adapter behind the shared discovery and M2 execution contracts.
+- [ ] Detect authentication and quota failures without reading or exposing raw credentials.
+- [ ] Include exact remaining usage only if the official integration exposes it; otherwise show `Not available`.
+- [ ] Exclude the runtime after 2026-11-21 unless the subscription is renewed or a separate eligible OpenAI account is configured.
 
 ### M4 — Adaptive transparent router
 
@@ -98,6 +137,8 @@ Definition of done:
 - [ ] Support `economy`, `balanced` and `quality` policies.
 - [ ] Model the ChatGPT subscription as unavailable after 2026-11-21 unless renewed.
 - [ ] Allow a manual override without changing the default automatic flow.
+- [ ] Use fresh provider-reported remaining allowance as a routing constraint when available.
+- [ ] Never compare an unknown or locally inferred percentage as if it were an official quota value.
 
 ## Later
 

@@ -6,11 +6,11 @@ This file is the compact handoff for the next human or coding-agent session.
 
 ## Current milestone
 
-M1 — Runtime inventory and stable contracts.
+M1.5 — Provider-reported usage visibility.
 
-Status: Done (2026-10-27).
+Status: Not started.
 
-Exact next action: begin M2 — unified execution inside ChePrompt — using its acceptance criteria in `docs/ROADMAP.md`; do not start M3 in that session.
+Exact next action: implement only M1.5 using the acceptance criteria and ready-to-copy prompt in `docs/OPENCODE.md`; do not start M2 in that session.
 
 ## Repository state
 
@@ -53,6 +53,16 @@ Exact next action: begin M2 — unified execution inside ChePrompt — using its
 | Anthropic API | Not configured | Eligible only if the user separately adds a paid API key. |
 
 OpenCode authentication was last checked with `opencode auth list`; only `OpenCode Console / Personal` was stored.
+
+## Usage-limit visibility policy
+
+- Display a percentage only when an official provider API or authenticated official CLI reports it.
+- Keep each usage window separate and include its reset time.
+- Record the source and observation time so stale data is visible.
+- Show `Not available` when Claude, ChatGPT or another runtime does not expose an official percentage.
+- Do not reverse-engineer private endpoints, scrape web dashboards or infer subscription quota from local prompt counts.
+- OpenCode Go is the first exact integration candidate through its official experimental usage-limits endpoint.
+- Absence of quota data means unknown, not exhausted.
 
 ## Architectural decisions
 
