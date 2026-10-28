@@ -423,6 +423,32 @@ dd,
   color: var(--cp-text);
 }
 
+.routing-notice {
+  margin: 9px 0;
+  padding: 8px 9px;
+  border-left: 3px solid var(--cp-warning);
+  border-radius: 0 6px 6px 0;
+  color: var(--cp-warning);
+  background: var(--cp-surface-raised);
+  font-size: 12px;
+}
+
+.routing-notice[data-kind="fallback"] {
+  border-left-color: var(--cp-magenta);
+  color: var(--cp-text);
+}
+
+.routing-notice[data-kind="fallback-unavailable"],
+.routing-notice[data-kind="budget-exhausted"] {
+  border-left-color: var(--cp-danger);
+  color: var(--cp-danger);
+}
+
+.routing-notice[data-kind="task-completed"] {
+  border-left-color: var(--cp-lime);
+  color: var(--cp-lime);
+}
+
 dl {
   margin: 12px 0;
 }

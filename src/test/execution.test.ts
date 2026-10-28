@@ -106,6 +106,7 @@ test("treats malformed JSONL as a failed execution and emits a clear error", asy
 
   assert.equal(result.status, "failed");
   assert.match(result.error ?? "", /JSON inválida/);
+  assert.equal(result.failureKind, "protocol");
   assert.ok(events.some((event) => event.type === "error"));
 });
 
@@ -136,8 +137,9 @@ test("recognizes approval output and provides interactive terminal arguments", a
     undefined,
     (event) => events.push(event),
   );
-  await execution.result;
+  const result = await execution.result;
 
+  assert.equal(result.failureKind, "approval");
   const approval = events.find((event) => event.type === "approval_required");
   assert.equal(approval?.sessionId, "ses_approval");
   assert.deepEqual(buildInteractiveOpenCodeArgs("ignored", decision, "ses_approval"), ["--session", "ses_approval"]);

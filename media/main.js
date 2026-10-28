@@ -10,6 +10,7 @@ const executionStatus = document.getElementById("execution-status");
 const executionOutput = document.getElementById("execution-output");
 const cancelExecutionButton = document.getElementById("cancel-execution");
 const decisionPanel = document.getElementById("decision");
+const routingNotice = document.getElementById("routing-notice");
 const overrideCandidateSelect = document.getElementById("override-candidate");
 const applyOverrideButton = document.getElementById("apply-override");
 const evaluationCaseSelect = document.getElementById("evaluation-case");
@@ -358,7 +359,7 @@ window.addEventListener("message", ({ data }) => {
     const runtimeName = data.runtimeId === "claude-code"
       ? "Claude Code"
       : data.runtimeId === "codex" ? "Codex" : "OpenCode";
-    executeButton.disabled = false;
+    executeButton.disabled = data.canExecuteAgain === false || result.status === "succeeded";
     analyzeButton.disabled = false;
     cancelExecutionButton.disabled = true;
     executeClaudeButton.disabled = !claudeAvailable;
@@ -393,7 +394,7 @@ window.addEventListener("message", ({ data }) => {
   }
 
   if (data.type === "executionError") {
-    executeButton.disabled = false;
+    executeButton.disabled = isDecisionLocked();
     analyzeButton.disabled = false;
     cancelExecutionButton.disabled = true;
     executeClaudeButton.disabled = !claudeAvailable;
@@ -446,10 +447,10 @@ window.addEventListener("message", ({ data }) => {
     status.dataset.state = "error";
     status.textContent = data.message;
     analyzeButton.disabled = false;
-    applyOverrideButton.disabled = !latestDecision;
-    executeClaudeButton.disabled = !latestDecision || !claudeAvailable;
-    executeCodexButton.disabled = !latestDecision || !codexAvailable;
-    executeButton.disabled = !latestDecision;
+    applyOverrideButton.disabled = !latestDecision || isDecisionLocked();
+    executeClaudeButton.disabled = !latestDecision || isDecisionLocked() || !claudeAvailable;
+    executeCodexButton.disabled = !latestDecision || isDecisionLocked() || !codexAvailable;
+    executeButton.disabled = !latestDecision || isDecisionLocked();
     return;
   }
 
@@ -472,6 +473,13 @@ window.addEventListener("message", ({ data }) => {
   document.getElementById("route-runtime").textContent = `${decision.selected.runtimeId} · proveedor ${decision.selected.providerId}`;
   document.getElementById("model-id").textContent = decision.selected.id;
   document.getElementById("reason").textContent = decision.reason;
+  if (decision.routingNotice) {
+    routingNotice.textContent = decision.routingNotice.message;
+    routingNotice.dataset.kind = decision.routingNotice.kind;
+    routingNotice.classList.remove("hidden");
+  } else {
+    routingNotice.classList.add("hidden");
+  }
   document.getElementById("impact").textContent = decision.selected.usageImpact;
   const allowance = document.getElementById("allowance");
   const allowanceValue = decision.remainingPercent === undefined
@@ -529,17 +537,24 @@ window.addEventListener("message", ({ data }) => {
   applyOverrideButton.disabled = false;
 
   status.dataset.state = "selected";
-  status.textContent = decision.manualOverride
-    ? "Override aplicado. Revisá el nuevo runtime, cupo y puntaje antes de ejecutar."
-    : "Ruta automática lista. Revisala antes de ejecutar.";
-  executeButton.disabled = false;
-  interactiveFallbackButton.disabled = !isRuntimeAvailable(decision.selected.runtimeId);
+  const noticeKind = decision.routingNotice?.kind;
+  status.dataset.state = ["fallback-unavailable", "budget-exhausted"].includes(noticeKind)
+    ? "error"
+    : noticeKind && noticeKind !== "task-completed" ? "warning" : "selected";
+  status.textContent = decision.routingNotice?.message
+    ?? (decision.manualOverride
+      ? "Override aplicado. Revisá el nuevo runtime, cupo y puntaje antes de ejecutar."
+      : "Ruta automática lista. Revisala antes de ejecutar.");
+  const decisionLocked = isDecisionLocked(decision);
+  executeButton.disabled = decisionLocked;
+  interactiveFallbackButton.disabled = decisionLocked || !isRuntimeAvailable(decision.selected.runtimeId);
   claudeActions.classList.remove("hidden");
-  executeClaudeButton.disabled = !claudeAvailable;
-  claudeInteractiveButton.disabled = !claudeAvailable;
+  executeClaudeButton.disabled = decisionLocked || !claudeAvailable;
+  claudeInteractiveButton.disabled = decisionLocked || !claudeAvailable;
   codexActions.classList.remove("hidden");
-  executeCodexButton.disabled = !codexAvailable;
-  codexInteractiveButton.disabled = !codexAvailable;
+  executeCodexButton.disabled = decisionLocked || !codexAvailable;
+  codexInteractiveButton.disabled = decisionLocked || !codexAvailable;
+  applyOverrideButton.disabled = decisionLocked;
   decisionPanel.classList.remove("hidden");
 });
 
@@ -628,6 +643,11 @@ function isRuntimeAvailable(runtimeId) {
   return false;
 }
 
+function isDecisionLocked(decision = latestDecision) {
+  return decision?.routingNotice?.kind === "budget-exhausted"
+    || decision?.routingNotice?.kind === "task-completed";
+}
+
 setInterval(() => {
   if (latestUsageSnapshot) {
     renderUsageSnapshot(latestUsageSnapshot);
@@ -657,8 +677,12 @@ function renderEvaluationHistory(records) {
       const tokens = record.inputTokens !== undefined || record.outputTokens !== undefined
         ? `${record.inputTokens ?? "?"} entrada / ${record.outputTokens ?? "?"} salida`
         : "uso de tokens no reportado";
-      const retryLabel = record.retries === null ? "reintentos no reportados" : `reintentos ${record.retries}`;
-      item.textContent = `${task} · ${record.modelLabel} · ${record.runtimeId}/${record.providerId} · ${record.executionStatus} · ${record.latencyMs} ms · ${tokens} · ${retryLabel} · verificación ${verificationLabel(record.verificationOutcome)}`;
+      const retryLabel = record.runtimeRetries === null
+        ? `reintentos ChePrompt ${record.chepromptRetries} · reintentos CLI no reportados`
+        : `reintentos ChePrompt ${record.chepromptRetries} · CLI ${record.runtimeRetries}`;
+      const failureLabel = record.failureKind ? ` · falla ${record.failureKind}` : "";
+      const fallbackLabel = record.fallbackFromRuntime ? ` · fallback desde ${record.fallbackFromRuntime}` : "";
+      item.textContent = `${task} · ${record.modelLabel} · ${record.runtimeId}/${record.providerId} · ${record.executionStatus}${failureLabel}${fallbackLabel} · ${record.latencyMs} ms · ${tokens} · ${retryLabel} · verificación ${verificationLabel(record.verificationOutcome)}`;
       const detail = document.createElement("details");
       const summary = document.createElement("summary");
       summary.textContent = "Motivo de la ruta";

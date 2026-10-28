@@ -165,6 +165,7 @@ test("streams official Claude JSON events through the shared execution contract"
 
   assert.equal(result.status, "succeeded");
   assert.equal(result.sessionId, "claude-session");
+  assert.equal(result.failureKind, undefined);
   assert.deepEqual(result.usage, {
     source: "Claude Code stream-json result",
     inputTokens: 120,
@@ -203,6 +204,7 @@ test("marks Claude Code temporarily unavailable after an official rate-limit fai
 
   assert.equal(result.status, "failed");
   assert.equal(result.runtimeUnavailable, true);
+  assert.equal(result.failureKind, "quota");
   assert.equal(result.retries, 1);
   assert.equal(inventory.runtime.availability, "unavailable");
   assert.match(inventory.runtime.message ?? "", /temporal/);

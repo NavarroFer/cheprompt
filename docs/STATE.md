@@ -6,11 +6,11 @@ This file is the compact handoff for the next human or coding-agent session.
 
 ## Current milestone
 
-M5 — Evaluation and outcome history.
+M7 — Parallel agents and worktrees.
 
-Status: M4.5 UI and M5 evaluation instrumentation are implemented. Integrated F5 validation, responsive visual checks and real evaluation outcome collection remain pending (2026-10-28).
+Status: User confirms integrated M4/M4.5/M5/M6 Extension Development Host validation, responsive checks and representative synthetic outcomes are complete (2026-10-28). M7 scope is explicit user-authored independent subtasks, isolated worktrees, reviewed execution, and one parent record; implementation is in progress.
 
-Exact next action: press `F5` and validate the full route/review/override/execute flow, OpenCode allowance refresh, verification controls and history, then check narrow/wide panels and 200% zoom. Run representative synthetic cases and mark verified outcomes; keep router weights unchanged until those measured outcomes support a change.
+Exact next action: implement reviewed multi-subtask routing/execution with isolated worktrees and parent/child outcome attribution; retain worktrees for user review, never auto-merge, and run `npm run check` plus `npm test`.
 
 ## Repository state
 
@@ -23,9 +23,11 @@ Exact next action: press `F5` and validate the full route/review/override/execut
 - M3.5 adapter: integrated; user confirmed Codex ChatGPT sign-in and successful Codex execution smoke test. Claude Pro sign-in/execution smoke test also confirmed. User reports the combined M1.5/M2/M3/M3.5 Extension Development Host flow passed.
 - M4 implementation commit: `1640cea feat: add adaptive cross-runtime routing`.
 - M4.5 visual implementation commit: `b3dee8a feat: apply terminal-inspired UI system`.
-- M5 synthetic evaluation set and local, prompt-free outcome history are implemented in the current working tree; no real outcome data has been collected yet.
+- M5 synthetic evaluation set and local, prompt-free outcome history are implemented; user confirms representative cases were run and verified.
+- M6 failure classification, reviewed fallback and two-attempt budget are implemented and user-confirmed in Extension Development Host.
+- M7 explicit-subtask scope selected; implementation is in progress.
 - Build/typecheck: passing (`npm run check`).
-- Tests: 63 passing, including cross-runtime scoring, webview regression and evaluation-history privacy/retention tests.
+- Tests: 66 passing, including cross-runtime scoring, fallback limits, webview regression and evaluation-history privacy/retention tests.
 - npm audit: no known vulnerabilities after removing the optional publishing dependency.
 - Distribution: local only; Marketplace publishing is out of scope.
 
@@ -57,9 +59,8 @@ Exact next action: press `F5` and validate the full route/review/override/execut
 
 - The current heuristic does not prove that it chooses the best model.
 - Runtime auth is checked through official CLIs, but model reachability is not independently validated; exact remaining usage is available only where an official provider surface reports it.
-- M4/M4.5 integrated route, allowance-refresh, override, execution and responsive/accessibility flows still need F5 validation.
-- No real M5 outcomes have been collected; synthetic routing scores alone are not evidence to recalibrate weights.
-- The scoring matrix is an initial hypothesis and does not prove optimal model choice; M5 evaluation is not implemented.
+- M7 parallel execution, worktree lifecycle, parent/child attribution and UI flow remain to be implemented and validated.
+- The scoring matrix is still an initial hypothesis and does not prove optimal model choice; keep weights unchanged unless verified outcome evidence supports recalibration.
 - Historical usage, latency and task outcomes are not recorded.
 - Automatic fallback and multi-agent execution do not exist.
 
@@ -124,11 +125,13 @@ M3 validation on 2026-10-28: `npm run check`, `npm test` (29 tests), `node --che
 
 M3.5 validation on 2026-10-28: `npm run check`, `npm test` (41 tests), `node --check media/main.js` and `git diff --check` passed. The user confirmed Codex ChatGPT sign-in and live execution; the auth parser handles CLI 0.165.0 status output on stderr. The user also confirmed the integrated M1.5/M2/M3/M3.5 Extension Development Host checks.
 
-M4 implementation validation on 2026-10-28: `npm run check`, `npm test` (54 tests), `node --check media/main.js` and `git diff --check` passed. Router tests cover deterministic cross-runtime scoring, score explanations, profiles, expiry, isolated allowance pools, limited flags and unknown/stale/malformed official usage. User-confirmed F5 validation for M4's earlier routing UI is pending; routing weights remain uncalibrated until M5.
+M4 implementation validation on 2026-10-28: `npm run check`, `npm test` (54 tests), `node --check media/main.js` and `git diff --check` passed. Router tests cover deterministic cross-runtime scoring, score explanations, profiles, expiry, isolated allowance pools, limited flags and unknown/stale/malformed official usage. User confirmed integrated F5 validation on 2026-10-28; routing weights remain uncalibrated.
 
-M4.5 implementation validation on 2026-10-28: `npm run check`, `npm test` (58 tests), `node --check media/main.js` and `git diff --check` passed. Webview regression tests cover Cmd/Ctrl+Enter, route/pool/score/alternative rendering, stream/cancel/approval/error states, AA token contrast, focus, reduced motion and narrow-layout rules. Manual Extension Development Host validation at narrow/wide widths and 200% zoom remains pending.
+M4.5 implementation validation on 2026-10-28: `npm run check`, `npm test` (58 tests), `node --check media/main.js` and `git diff --check` passed. Webview regression tests cover Cmd/Ctrl+Enter, route/pool/score/alternative rendering, stream/cancel/approval/error states, AA token contrast, focus, reduced motion and narrow-layout rules. User confirmed manual Extension Development Host validation at narrow/wide widths and 200% zoom.
 
-M5 implementation validation on 2026-10-28: `npm run check`, `npm test` (63 tests), `node --check media/main.js` and `git diff --check` passed. The 20-case synthetic set is stratified 5/10/5; local history is capped at 100 and tested to reject prompt-bearing records. Codex/Claude token counts are captured only when their official execution stream reports them; other usage and unreported retries remain unknown. No router weights were recalibrated.
+M5 implementation validation on 2026-10-28: `npm run check`, `npm test` (63 tests), `node --check media/main.js` and `git diff --check` passed. The 20-case synthetic set is stratified 5/10/5; local history is capped at 100 and tested to reject prompt-bearing records. User confirms representative cases and verification outcomes were collected. Codex/Claude token counts are captured only when their official execution stream reports them; other usage and unreported retries remain unknown. No router weights were recalibrated.
+
+M6 implementation validation on 2026-10-28: `npm run check` passed; `npm test` passed (66 tests). User confirmed integrated F5 validation of objective fallback, approval/cancel exclusions, attempt-budget exhaustion and low-confidence notice. Fallback remains explicitly reviewed and never auto-starts.
 
 ## Session completion checklist
 

@@ -8,6 +8,8 @@ import {
   USAGE_SNAPSHOT_MAX_AGE_MS,
 } from "./types";
 
+export const LOW_CONFIDENCE_THRESHOLD = 0.65;
+
 const MODELS: Record<string, RuntimeModel> = {
   luna: {
     id: "opencode-go/gpt-6-luna",
@@ -127,6 +129,12 @@ export function routePrompt(
   const matchedSignals = [...complexMatches, ...simpleMatches].slice(0, 5);
   const confidence = confidenceFromScores(scored.map((candidate) => candidate.score.total));
   const usage = freshUsageForPool(selected.allowancePoolId, usageSnapshots, evaluationTime);
+  const routingNotice = confidence < LOW_CONFIDENCE_THRESHOLD
+    ? {
+      kind: "low-confidence" as const,
+      message: "La diferencia entre candidatos es baja; revisá las alternativas antes de ejecutar.",
+    }
+    : undefined;
 
   return {
     profile,
@@ -141,6 +149,7 @@ export function routePrompt(
       allowanceObservedAt: usage.snapshot.observedAt,
       remainingPercent: usage.remainingPercent,
     } : {}),
+    ...(routingNotice ? { routingNotice } : {}),
     matchedSignals,
     confidence,
     pricing: buildPricing(selected),

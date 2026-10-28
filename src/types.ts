@@ -98,6 +98,16 @@ export interface RuntimeExecutionEvent {
 
 export type RuntimeExecutionStatus = "succeeded" | "failed" | "cancelled";
 
+export type RuntimeFailureKind = "authentication" | "quota" | "tool" | "process" | "approval" | "protocol" | "verification" | "unknown";
+
+export interface RoutingNotice {
+  kind: "low-confidence" | "fallback" | "fallback-unavailable" | "budget-exhausted" | "task-completed";
+  message: string;
+  attempt?: number;
+  maxAttempts?: number;
+  fromRuntimeId?: string;
+}
+
 export interface ExecutionUsageMetrics {
   source: string;
   inputTokens?: number;
@@ -113,6 +123,7 @@ export interface RuntimeExecutionResult {
   runtimeUnavailable?: boolean;
   usage?: ExecutionUsageMetrics;
   retries?: number;
+  failureKind?: RuntimeFailureKind;
 }
 
 export interface RoutingScoreBreakdown {
@@ -147,4 +158,5 @@ export interface RoutingDecision {
   confidence: number;
   pricing: string;
   manualOverride?: boolean;
+  routingNotice?: RoutingNotice;
 }

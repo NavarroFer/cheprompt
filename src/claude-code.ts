@@ -13,6 +13,7 @@ import {
   RuntimeAvailability,
   RuntimeDescriptor,
   RuntimeExecutionEvent,
+  RuntimeFailureKind,
   RuntimeExecutionResult,
   RuntimeInventory,
   RuntimeModel,
@@ -156,6 +157,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     let emittedText = false;
     let retryCount = 0;
     let usageMetrics: ExecutionUsageMetrics | undefined;
+    let failureKind: RuntimeFailureKind | undefined;
+    let approvalRequired = false;
 
     const emit = (type: RuntimeExecutionEvent["type"], values: Partial<RuntimeExecutionEvent> = {}) => {
       onEvent({ executionId, type, timestamp: Date.now(), ...values });
@@ -171,12 +174,14 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         message = JSON.parse(normalized);
       } catch {
         malformedOutput = true;
+        failureKind = "protocol";
         reportedError = "Claude Code devolvió una línea JSON inválida.";
         emit("error", { sessionId, message: reportedError });
         return;
       }
       if (!isRecord(message) || typeof message.type !== "string") {
         malformedOutput = true;
+        failureKind = "protocol";
         reportedError = "Claude Code devolvió un evento sin tipo.";
         emit("error", { sessionId, message: reportedError });
         return;
@@ -206,7 +211,10 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       if (message.type === "system" && message.subtype === "api_retry") {
         retryCount += 1;
         const category = typeof message.error === "string" ? message.error : "";
-        if (isAuthOrQuotaFailure(category)) authOrQuotaFailure = true;
+        if (isAuthOrQuotaFailure(category)) {
+          authOrQuotaFailure = true;
+          failureKind = classifyClaudeFailure(category);
+        }
         emit("diagnostic", {
           sessionId: eventSessionId,
           message: isAuthOrQuotaFailure(category) ? "Claude Code informó un problema de autenticación o cuota." : "Claude Code reintentará una solicitud.",
@@ -214,6 +222,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         return;
       }
       if (message.type === "system" && message.subtype === "permission_denied") {
+        approvalRequired = true;
+        failureKind = "approval";
         emit("approval_required", {
           sessionId: eventSessionId,
           message: "Claude Code requiere una aprobación interactiva; continuá la sesión en su terminal.",
@@ -224,7 +234,12 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         usageMetrics = parseClaudeTokenUsage(message.usage);
         if (message.is_error === true) {
           reportedError = typeof message.result === "string" ? message.result : "Claude Code informó un error.";
-          authOrQuotaFailure ||= isAuthOrQuotaFailure(reportedError);
+          if (isAuthOrQuotaFailure(reportedError)) {
+            authOrQuotaFailure = true;
+            failureKind = classifyClaudeFailure(reportedError);
+          } else {
+            failureKind = "tool";
+          }
           emit("error", { sessionId: eventSessionId, message: safeClaudeError(reportedError) });
           return;
         }
@@ -265,6 +280,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       const error = completion.error
         ? "No se pudo iniciar Claude Code."
         : reportedError ?? (completion.exitCode !== 0 ? `Claude Code terminó con código ${completion.exitCode}.` : undefined);
+      if (completion.error || (completion.exitCode !== 0 && !failureKind)) failureKind = "process";
+      if (malformedOutput) failureKind = "protocol";
+      if (approvalRequired) failureKind = "approval";
       if (status === "failed" && authOrQuotaFailure) {
         this.unavailableUntil = Date.now() + UNAVAILABLE_COOLDOWN_MS;
         this.unavailableMessage = "Claude Code informó un problema temporal de autenticación o cuota.";
@@ -277,6 +295,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         ...(error ? { error: safeClaudeError(error) } : {}),
         ...(usageMetrics ? { usage: usageMetrics } : {}),
         retries: retryCount,
+        ...(status === "failed" && failureKind ? { failureKind } : {}),
         ...(status === "failed" && authOrQuotaFailure ? { runtimeUnavailable: true } : {}),
       };
       emit(cancelled ? "cancelled" : "completed", {
@@ -327,6 +346,12 @@ export function isClaudeSubscriptionAuth(method: string): boolean {
 
 export function isAuthOrQuotaFailure(message: string): boolean {
   return /unauthori[sz]ed|authentication|login|subscription|rate.?limit|quota|usage limit|billing|oauth|account_on_hold/i.test(message);
+}
+
+function classifyClaudeFailure(message: string): RuntimeFailureKind {
+  if (/rate.?limit|quota|usage limit|billing|account_on_hold/i.test(message)) return "quota";
+  if (/unauthori[sz]ed|authentication|login|subscription|oauth/i.test(message)) return "authentication";
+  return "tool";
 }
 
 export function safeClaudeError(message: string): string {

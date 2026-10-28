@@ -56,14 +56,15 @@ test("routes the full evaluation set without making model calls", () => {
 
 test("records routing, latency and reported token metrics without retaining the prompt", () => {
   const prompt = evaluationCases[0].prompt;
-  const record = createEvaluationRecord(prompt, decision, result, 1_000, 2_500);
+  const record = createEvaluationRecord(prompt, decision, result, 1_000, 0, 2_500);
 
   assert.equal(record.evaluationCaseId, "case-01");
   assert.equal(record.modelId, decision.selected.id);
   assert.equal(record.routingReason, decision.reason);
   assert.equal(record.latencyMs, 1_500);
   assert.deepEqual([record.inputTokens, record.outputTokens, record.usageSource], [200, 30, "Codex CLI JSONL"]);
-  assert.equal(record.retries, 1);
+  assert.equal(record.chepromptRetries, 0);
+  assert.equal(record.runtimeRetries, 1);
   assert.equal(record.verificationOutcome, "unverified");
   assert.equal("prompt" in record, false);
   assert.equal(JSON.stringify(record).includes(prompt), false);
@@ -71,7 +72,7 @@ test("records routing, latency and reported token metrics without retaining the 
 });
 
 test("bounds local history, rejects prompt-bearing records and updates verification outcome", () => {
-  const base = createEvaluationRecord("tarea libre", decision, result, 0, 10);
+  const base = createEvaluationRecord("tarea libre", decision, result, 0, 0, 10);
   const records = Array.from({ length: 105 }, (_, index) => ({ ...base, id: `run-${index}` }));
   const bounded = appendEvaluationRecord(records, { ...base, id: "latest" });
   assert.equal(bounded.length, 100);

@@ -12,6 +12,7 @@ import {
   RuntimeAdapter,
   RuntimeAvailability,
   RuntimeExecutionEvent,
+  RuntimeFailureKind,
   RuntimeExecutionResult,
   RuntimeInventory,
   RuntimeModel,
@@ -201,6 +202,7 @@ export class CodexAdapter implements RuntimeAdapter {
     let malformedOutput = false;
     let cancelled = false;
     let reportedError: string | undefined;
+    let reportedFailureKind: RuntimeFailureKind | undefined;
     let usageMetrics: ExecutionUsageMetrics | undefined;
 
     const emit = (type: RuntimeExecutionEvent["type"], values: Partial<RuntimeExecutionEvent> = {}) => {
@@ -228,12 +230,14 @@ export class CodexAdapter implements RuntimeAdapter {
         value = JSON.parse(normalized);
       } catch {
         malformedOutput = true;
+        reportedFailureKind = "protocol";
         reportedError = "Codex devolvió una línea JSON inválida.";
         emit("error", { sessionId, message: reportedError });
         return;
       }
       if (!isRecord(value) || typeof value.type !== "string") {
         malformedOutput = true;
+        reportedFailureKind = "protocol";
         reportedError = "Codex devolvió un evento sin tipo.";
         emit("error", { sessionId, message: reportedError });
         return;
@@ -260,6 +264,7 @@ export class CodexAdapter implements RuntimeAdapter {
       if (value.type === "turn.failed" || value.type === "error") {
         const failure = classifyCodexFailure(readErrorMessage(value));
         reportedError = codexFailureMessage(failure);
+        reportedFailureKind = toRuntimeFailureKind(failure);
         if (failure === "approval") {
           emit("approval_required", { sessionId, message: reportedError });
         }
@@ -289,6 +294,13 @@ export class CodexAdapter implements RuntimeAdapter {
       const error = completion.error
         ? "No se pudo iniciar Codex CLI."
         : reportedError ?? (completion.exitCode !== 0 ? "Codex terminó con un error." : undefined);
+      const failureKind = status !== "failed"
+        ? undefined
+        : completion.error
+          ? "process"
+          : malformedOutput
+            ? "protocol"
+            : reportedFailureKind ?? (completion.exitCode !== 0 ? "process" : "unknown");
       const final: RuntimeExecutionResult = {
         executionId,
         status,
@@ -296,6 +308,7 @@ export class CodexAdapter implements RuntimeAdapter {
         ...(sessionId ? { sessionId } : {}),
         ...(error ? { error } : {}),
         ...(usageMetrics ? { usage: usageMetrics } : {}),
+        ...(failureKind ? { failureKind } : {}),
         ...(status === "failed" && this.unavailableUntil > Date.now() ? { runtimeUnavailable: true } : {}),
       };
       emit(cancelled ? "cancelled" : "completed", {
@@ -411,6 +424,11 @@ function codexFailureMessage(failure: CodexFailure): string {
     default:
       return "Codex informó un error durante la ejecución.";
   }
+}
+
+function toRuntimeFailureKind(failure: CodexFailure): RuntimeFailureKind {
+  if (failure === "authentication" || failure === "quota" || failure === "approval") return failure;
+  return "tool";
 }
 
 async function drain(stream: AsyncIterable<string>): Promise<void> {

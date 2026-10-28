@@ -11,6 +11,7 @@ import {
   RuntimeDescriptor,
   RuntimeExecutionEvent,
   RuntimeExecutionResult,
+  RuntimeFailureKind,
   UsageSnapshot,
   UsageWindow,
   USAGE_SNAPSHOT_MAX_AGE_MS,
@@ -130,7 +131,9 @@ export class OpenCodeExecutionAdapter {
     let sessionId: string | undefined;
     let malformedOutput = false;
     let reportedError: string | undefined;
+    let reportedFailureKind: RuntimeFailureKind | undefined;
     let cancelled = false;
+    let approvalRequired = false;
 
     const emit = (type: RuntimeExecutionEvent["type"], values: Partial<RuntimeExecutionEvent> = {}) => {
       onEvent({ executionId, type, timestamp: Date.now(), ...values });
@@ -156,6 +159,7 @@ export class OpenCodeExecutionAdapter {
         value = JSON.parse(normalized);
       } catch {
         if (/permission requested:/i.test(normalized)) {
+          approvalRequired = true;
           emit("approval_required", { sessionId, message: normalized });
           return;
         }
@@ -202,10 +206,12 @@ export class OpenCodeExecutionAdapter {
         reportedError = typeof error?.message === "string"
           ? error.message
           : typeof value.message === "string" ? value.message : "OpenCode informó un error.";
+        if (!malformedOutput) reportedFailureKind = "tool";
         emit("error", { sessionId: eventSessionId, timestamp: time, message: reportedError });
         return;
       }
       if (value.type === "approval_required" || value.type === "permission.asked") {
+        approvalRequired = true;
         emit("approval_required", { sessionId: eventSessionId, timestamp: time, message: "OpenCode requiere una aprobación interactiva." });
       }
     };
@@ -228,12 +234,22 @@ export class OpenCodeExecutionAdapter {
       const error = completion.error
         ? "No se pudo iniciar OpenCode."
         : reportedError ?? (completion.exitCode !== 0 ? `OpenCode terminó con código ${completion.exitCode}.` : undefined);
+      const failureKind = status !== "failed"
+        ? undefined
+        : approvalRequired
+          ? "approval"
+          : completion.error || (completion.exitCode !== 0 && !reportedError)
+            ? "process"
+            : malformedOutput
+              ? "protocol"
+              : reportedFailureKind ?? "unknown";
       const final: RuntimeExecutionResult = {
         executionId,
         status,
         exitCode: completion.exitCode,
         ...(sessionId ? { sessionId } : {}),
         ...(error ? { error } : {}),
+        ...(failureKind ? { failureKind } : {}),
       };
       emit(cancelled ? "cancelled" : "completed", {
         ...(sessionId ? { sessionId } : {}),

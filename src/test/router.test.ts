@@ -136,6 +136,17 @@ test("returns the same route and score breakdown for identical inputs", () => {
   assert.deepEqual(second, first);
 });
 
+test("flags close candidate scores as low-confidence without executing an escalation", () => {
+  const candidates = [
+    runtimeModel("candidate-a", "opencode", "provider-a", "pool-a", "medium"),
+    runtimeModel("candidate-b", "codex", "provider-b", "pool-b", "medium"),
+  ];
+  const decision = routePrompt("Revisá el estado del componente.", "balanced", candidates, AS_OF);
+
+  assert.equal(decision.confidence, 0.58);
+  assert.equal(decision.routingNotice?.kind, "low-confidence");
+});
+
 test("supports a cross-runtime route when task fit and policy favor Claude", () => {
   const candidates = [
     routingCatalog[0],

@@ -6,6 +6,7 @@ import {
   launchClaudeCodeLogin,
 } from "./claude-code";
 import { CodexAdapter } from "./codex";
+import { canStartExecution, MAX_TASK_EXECUTION_ATTEMPTS, shouldProposeFallback } from "./fallback";
 import {
   appendEvaluationRecord,
   createEvaluationRecord,
@@ -22,7 +23,7 @@ import {
   OpenCodeExecutionAdapter,
   RuntimeExecutionHandle,
 } from "./opencode";
-import { routePrompt } from "./router";
+import { LOW_CONFIDENCE_THRESHOLD, routePrompt } from "./router";
 import {
   RoutingDecision,
   RoutingProfile,
@@ -62,6 +63,10 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
   private activeRuntime: "opencode" | "claude-code" | "codex" = "opencode";
   private lastExecutionRuntime: "opencode" | "claude-code" | "codex" = "opencode";
   private lastExecutionSessionId?: string;
+  private executionsForPrompt = 0;
+  private fallbackProposed = false;
+  private taskSucceeded = false;
+  private latestEvaluationRecordId?: string;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -169,6 +174,10 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
           this.lastExecutionSessionId = undefined;
           this.lastExecutionRuntime = "opencode";
           this.activeRuntime = "opencode";
+          this.executionsForPrompt = 0;
+          this.fallbackProposed = false;
+          this.taskSucceeded = false;
+          this.latestEvaluationRecordId = undefined;
           if (!this.inventory) {
             throw new Error("El inventario de modelos todavía no está disponible. Revisá OpenCode e intentá de nuevo.");
           }
@@ -329,6 +338,24 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
       updatedRecordId: message.recordId,
       verificationOutcome: message.outcome,
     });
+
+    if (message.outcome === "failed" && message.recordId === this.latestEvaluationRecordId && this.lastDecision) {
+      const failedDecision = { ...this.lastDecision };
+      delete failedDecision.routingNotice;
+      this.lastDecision = failedDecision;
+      this.taskSucceeded = false;
+      const verificationFailure: RuntimeExecutionResult = {
+        executionId: message.recordId,
+        status: "failed",
+        exitCode: 1,
+        failureKind: "verification",
+      };
+      if (shouldProposeFallback(verificationFailure, this.executionsForPrompt, this.fallbackProposed)) {
+        await this.proposeFallback(webview, failedDecision, failedDecision.selected.runtimeId, "verification");
+      } else if (this.executionsForPrompt >= MAX_TASK_EXECUTION_ATTEMPTS) {
+        await this.markFallbackBudgetExhausted(webview);
+      }
+    }
   }
 
   private async saveEvaluationRecord(
@@ -336,9 +363,11 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
     result: RuntimeExecutionResult,
     startedAt: number,
     prompt: string,
+    chepromptRetries = 0,
   ): Promise<EvaluationRecord> {
-    const record = createEvaluationRecord(prompt, decision, result, startedAt);
+    const record = createEvaluationRecord(prompt, decision, result, startedAt, chepromptRetries);
     this.evaluationHistory = appendEvaluationRecord(this.evaluationHistory, record);
+    this.latestEvaluationRecordId = record.id;
     try {
       await this.globalState.update(EVALUATION_HISTORY_KEY, this.evaluationHistory);
     } catch {
@@ -347,8 +376,88 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
     return record;
   }
 
+  private async proposeFallback(
+    webview: vscode.Webview,
+    failedDecision: RoutingDecision,
+    failedRuntime: string,
+    failureKind: NonNullable<RuntimeExecutionResult["failureKind"]>,
+  ): Promise<void> {
+    if (!this.lastPrompt || this.fallbackProposed || this.executionsForPrompt >= MAX_TASK_EXECUTION_ATTEMPTS) return;
+    this.fallbackProposed = true;
+
+    const remaining = this.routingCandidates().filter((candidate) => !sameCandidate(candidate, failedDecision.selected));
+    const crossRuntime = remaining.filter((candidate) => candidate.runtimeId !== failedRuntime);
+    const preferred = crossRuntime.length ? crossRuntime : remaining;
+    const attempt = this.executionsForPrompt + 1;
+    const unavailableDecision = (message: string): RoutingDecision => ({
+      ...failedDecision,
+      routingNotice: {
+        kind: "fallback-unavailable",
+        message: `${message} Presupuesto: ${this.executionsForPrompt}/${MAX_TASK_EXECUTION_ATTEMPTS} intentos usados.`,
+        attempt,
+        maxAttempts: MAX_TASK_EXECUTION_ATTEMPTS,
+      },
+    });
+
+    if (!preferred.length) {
+      this.lastDecision = unavailableDecision("No hay un candidato alternativo elegible para el fallback.");
+      await webview.postMessage({ type: "decision", decision: this.lastDecision });
+      return;
+    }
+
+    try {
+      const fallback = routePrompt(
+        this.lastPrompt,
+        failedDecision.profile,
+        preferred,
+        Date.now(),
+        this.usageSnapshots,
+      );
+      const allowance = fallback.remainingPercent === undefined
+        ? "El cupo exacto de este pool no está disponible."
+        : `${fallback.remainingPercent}% del cupo reportado está disponible.`;
+      const confidence = fallback.confidence < LOW_CONFIDENCE_THRESHOLD
+        ? " La confianza sigue baja; revisá las alternativas."
+        : "";
+      this.lastDecision = {
+        ...fallback,
+        routingNotice: {
+          kind: "fallback",
+          attempt,
+          maxAttempts: MAX_TASK_EXECUTION_ATTEMPTS,
+          fromRuntimeId: failedRuntime,
+          message: `${failedDecision.selected.label} falló por ${failureKindLabel(failureKind)}. Se propone ${fallback.selected.label} (${fallback.selected.runtimeId}/${fallback.selected.providerId}) como intento ${attempt}/${MAX_TASK_EXECUTION_ATTEMPTS}. ${allowance}${confidence} Revisá la ruta y aprobá antes de ejecutar.`,
+        },
+      };
+      await webview.postMessage({ type: "decision", decision: this.lastDecision });
+    } catch {
+      this.lastDecision = unavailableDecision("No queda una alternativa elegible por disponibilidad o cupo oficial.");
+      await webview.postMessage({ type: "decision", decision: this.lastDecision });
+    }
+  }
+
+  private async markFallbackBudgetExhausted(webview: vscode.Webview): Promise<void> {
+    if (!this.lastDecision) return;
+    this.lastDecision = {
+      ...this.lastDecision,
+      routingNotice: {
+        kind: "budget-exhausted",
+        attempt: this.executionsForPrompt,
+        maxAttempts: MAX_TASK_EXECUTION_ATTEMPTS,
+        message: `Presupuesto agotado: máximo ${MAX_TASK_EXECUTION_ATTEMPTS} ejecuciones para esta tarea. Analizá una nueva tarea para reiniciar el ciclo.`,
+      },
+    };
+    await webview.postMessage({ type: "decision", decision: this.lastDecision });
+  }
+
   private async refreshDecisionForCurrentPrompt(webview: vscode.Webview): Promise<void> {
-    if (!this.lastPrompt || !this.lastDecision || this.activeExecution) return;
+    if (
+      !this.lastPrompt
+      || !this.lastDecision
+      || this.activeExecution
+      || this.taskSucceeded
+      || this.executionsForPrompt >= MAX_TASK_EXECUTION_ATTEMPTS
+    ) return;
 
     const previous = this.lastDecision;
     const asOf = Date.now();
@@ -361,7 +470,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         this.usageSnapshots,
       );
 
-      if (!previous.manualOverride) {
+      if (!previous.manualOverride && previous.routingNotice?.kind !== "fallback") {
         this.lastDecision = automatic;
       } else {
         try {
@@ -388,13 +497,24 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
             alternativeScores: alternatives.map((model) =>
               automaticRanked.find((candidate) => sameCandidate(candidate.model, model))!.score,
             ),
-            manualOverride: true,
-            reason: `Override manual elegido por vos. ${manual.reason}`,
+            ...(previous.manualOverride ? { manualOverride: true } : {}),
+            ...(previous.routingNotice ? { routingNotice: previous.routingNotice } : {}),
+            reason: previous.manualOverride
+              ? `Override manual elegido por vos. ${manual.reason}`
+              : previous.reason,
           };
         } catch {
           this.lastDecision = {
             ...automatic,
             reason: `El override dejó de estar disponible; se recalculó la ruta. ${automatic.reason}`,
+            ...(previous.routingNotice?.kind === "fallback" ? {
+              routingNotice: {
+                kind: "fallback-unavailable",
+                message: "La ruta de fallback dejó de estar disponible por cupo o estado del runtime.",
+                attempt: previous.routingNotice.attempt,
+                maxAttempts: previous.routingNotice.maxAttempts,
+              },
+            } : {}),
           };
         }
       }
@@ -427,7 +547,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
     webview: vscode.Webview,
     choice: OverrideCandidateMessage,
   ): Promise<void> {
-    if (!this.lastPrompt || !this.lastDecision || this.activeExecution) {
+    if (!this.lastPrompt || !this.lastDecision || this.activeExecution || this.taskSucceeded) {
       await webview.postMessage({ type: "error", message: "Analizá la tarea y detené cualquier ejecución antes del override." });
       return;
     }
@@ -450,7 +570,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
     webview: vscode.Webview,
     runtimeId: "claude-code" | "codex",
   ): Promise<void> {
-    if (!this.lastPrompt || !this.lastDecision || this.activeExecution) {
+    if (!this.lastPrompt || !this.lastDecision || this.activeExecution || this.taskSucceeded) {
       await webview.postMessage({ type: "error", message: "Analizá la tarea y detené cualquier ejecución antes del override." });
       return;
     }
@@ -499,6 +619,9 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         alternatives: alternatives.map((entry) => entry.model),
         alternativeScores: alternatives.map((entry) => entry.score),
         manualOverride: true,
+        ...(this.lastDecision.routingNotice?.kind === "fallback"
+          ? { routingNotice: this.lastDecision.routingNotice }
+          : {}),
         reason: `Override manual elegido por vos. ${manual.reason}`,
       };
       await webview.postMessage({ type: "decision", decision: this.lastDecision });
@@ -542,6 +665,16 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
       });
       return;
     }
+    if (!canStartExecution(this.executionsForPrompt, this.taskSucceeded)) {
+      void webview.postMessage({
+        type: "executionError",
+        runtimeId: runtime,
+        message: this.taskSucceeded
+          ? "Esta tarea ya terminó correctamente. Analizá una nueva tarea para iniciar otra ejecución."
+          : `Presupuesto agotado: máximo ${MAX_TASK_EXECUTION_ATTEMPTS} ejecuciones por análisis. Analizá una nueva tarea para continuar.`,
+      });
+      return;
+    }
 
     const prompt = this.lastPrompt;
     const decision = this.lastDecision;
@@ -564,6 +697,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
+    this.executionsForPrompt += 1;
     const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     try {
       const onEvent = (event: RuntimeExecutionEvent) => {
@@ -590,23 +724,50 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
       void execution.result.then(async (result) => {
         if (result.sessionId) this.lastExecutionSessionId = result.sessionId;
         if (this.activeExecution === execution) this.activeExecution = undefined;
-        const evaluationRecord = await this.saveEvaluationRecord(decision, result, startedAt, prompt);
+        const evaluationRecord = await this.saveEvaluationRecord(
+          decision,
+          result,
+          startedAt,
+          prompt,
+          Math.max(0, this.executionsForPrompt - 1),
+        );
+        this.taskSucceeded = result.status === "succeeded";
+        if (this.taskSucceeded) {
+          this.lastDecision = {
+            ...decision,
+            routingNotice: {
+              kind: "task-completed",
+              attempt: this.executionsForPrompt,
+              maxAttempts: MAX_TASK_EXECUTION_ATTEMPTS,
+              message: "La ejecución terminó correctamente. Analizá una nueva tarea para iniciar otro ciclo.",
+            },
+          };
+        }
         await webview.postMessage({
           type: "executionResult",
           result,
           runtimeId: runtime,
           evaluationRecordId: evaluationRecord.id,
+          canExecuteAgain: !this.taskSucceeded && this.executionsForPrompt < MAX_TASK_EXECUTION_ATTEMPTS,
         });
+        if (this.taskSucceeded && this.lastDecision) {
+          await webview.postMessage({ type: "decision", decision: this.lastDecision });
+        }
         if (runtime === "claude-code" && result.runtimeUnavailable && this.claudeAdapter) {
           this.claudeInventory = await this.claudeAdapter.getInventory();
           await webview.postMessage({ type: "claudeRuntime", inventory: this.claudeInventory });
-          await this.refreshDecisionForCurrentPrompt(webview);
         }
         if (runtime === "codex" && result.runtimeUnavailable && this.codexAdapter) {
           const expiry = vscode.workspace.getConfiguration("cheprompt")
             .get<string>("codex.chatgptSubscriptionExpiresAt", "2026-11-22T00:00:00.000Z");
           this.codexInventory = await this.codexAdapter.getInventory(expiry);
           await webview.postMessage({ type: "codexRuntime", inventory: this.codexInventory });
+        }
+        if (result.status === "failed" && this.executionsForPrompt >= MAX_TASK_EXECUTION_ATTEMPTS) {
+          await this.markFallbackBudgetExhausted(webview);
+        } else if (shouldProposeFallback(result, this.executionsForPrompt, this.fallbackProposed)) {
+          await this.proposeFallback(webview, decision, runtime, result.failureKind!);
+        } else if (result.runtimeUnavailable) {
           await this.refreshDecisionForCurrentPrompt(webview);
         }
       }).catch(async (error: unknown) => {
@@ -616,14 +777,26 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
           status: "failed",
           exitCode: -1,
           error: "No se pudo completar la ejecución.",
+          failureKind: "process",
         };
-        const evaluationRecord = await this.saveEvaluationRecord(decision, failedResult, startedAt, prompt);
+        const evaluationRecord = await this.saveEvaluationRecord(
+          decision,
+          failedResult,
+          startedAt,
+          prompt,
+          Math.max(0, this.executionsForPrompt - 1),
+        );
         await webview.postMessage({
           type: "executionResult",
           result: failedResult,
           runtimeId: runtime,
           evaluationRecordId: evaluationRecord.id,
         });
+        if (shouldProposeFallback(failedResult, this.executionsForPrompt, this.fallbackProposed)) {
+          await this.proposeFallback(webview, decision, runtime, failedResult.failureKind!);
+        } else if (this.executionsForPrompt >= MAX_TASK_EXECUTION_ATTEMPTS) {
+          await this.markFallbackBudgetExhausted(webview);
+        }
       });
     } catch (error) {
       const failedResult: RuntimeExecutionResult = {
@@ -631,8 +804,15 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         status: "failed",
         exitCode: -1,
         error: "No se pudo iniciar la ejecución.",
+        failureKind: "process",
       };
-      void this.saveEvaluationRecord(decision, failedResult, startedAt, prompt).then((evaluationRecord) => webview.postMessage({
+      void this.saveEvaluationRecord(
+        decision,
+        failedResult,
+        startedAt,
+        prompt,
+        Math.max(0, this.executionsForPrompt - 1),
+      ).then((evaluationRecord) => webview.postMessage({
         type: "executionResult",
         result: failedResult,
         runtimeId: runtime,
@@ -894,6 +1074,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         <p id="route-runtime" class="mono"></p>
         <p id="model-id" class="mono"></p>
         <p id="reason"></p>
+        <p id="routing-notice" class="routing-notice hidden" role="status" aria-live="polite"></p>
         <dl>
           <div><dt>Impacto de uso</dt><dd id="impact"></dd></div>
           <div><dt>Cupo de ejecución</dt><dd id="allowance"></dd></div>
@@ -1076,7 +1257,21 @@ function decisionReviewSignature(decision: RoutingDecision): string {
     allowanceSource: decision.allowanceSource ?? null,
     allowanceObservedAt: decision.allowanceObservedAt ?? null,
     manualOverride: decision.manualOverride ?? false,
+    routingNotice: decision.routingNotice ?? null,
   });
+}
+
+function failureKindLabel(failureKind: RuntimeExecutionResult["failureKind"]): string {
+  switch (failureKind) {
+    case "authentication": return "un problema de autenticación";
+    case "quota": return "un límite de uso";
+    case "tool": return "un error de herramienta";
+    case "process": return "un error del runtime";
+    case "approval": return "una aprobación pendiente";
+    case "protocol": return "un error de protocolo";
+    case "verification": return "una verificación humana fallida";
+    default: return "un error objetivo";
+  }
 }
 
 function createNonce(): string {

@@ -263,9 +263,9 @@ test("passes an explicitly selected model while the default remains Codex-config
 });
 
 test("classifies quota and auth errors safely and temporarily disables the runtime", async () => {
-  for (const [detail, expected] of [
-    ["Rate limit reached for account", /límite de uso/],
-    ["Not authenticated; secret token=value", /requiere autenticación/],
+  for (const [detail, expected, failureKind] of [
+    ["Rate limit reached for account", /límite de uso/, "quota"],
+    ["Not authenticated; secret token=value", /requiere autenticación/, "authentication"],
   ] as const) {
     const failed = new FakeStreamingProcess([
       `${JSON.stringify({ type: "turn.failed", error: { message: detail } })}\n`,
@@ -281,6 +281,7 @@ test("classifies quota and auth errors safely and temporarily disables the runti
 
     assert.equal(result.status, "failed");
     assert.match(result.error ?? "", expected);
+    assert.equal(result.failureKind, failureKind);
     assert.equal(JSON.stringify(events).includes("secret token=value"), false);
     const inventory = await adapter.getInventory();
     assert.equal(inventory.runtime.availability, "unavailable");
@@ -301,6 +302,7 @@ test("surfaces approval-needed events without enabling automatic approval", asyn
   const result = await execution.result;
 
   assert.equal(result.status, "failed");
+  assert.equal(result.failureKind, "approval");
   assert.ok(events.some((event) => event.type === "approval_required"));
   assert.ok(!buildCodexExecArgs("Task", decision).includes("--full-auto"));
 });
@@ -311,6 +313,7 @@ test("treats malformed JSONL as failed and supports cancellation", async () => {
   const malformedResult = await new CodexAdapter("fake-codex", new FakeProcessExecutor([]), new FakeSpawner(malformed))
     .start("Task", decision, undefined, (event) => malformedEvents.push(event)).result;
   assert.equal(malformedResult.status, "failed");
+  assert.equal(malformedResult.failureKind, "protocol");
   assert.match(malformedResult.error ?? "", /JSON inválida/);
   assert.ok(malformedEvents.some((event) => event.type === "error"));
 

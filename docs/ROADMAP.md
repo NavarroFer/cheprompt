@@ -22,8 +22,9 @@ The router optimizes expected successful completion, not the cheapest first call
 
 - **Completed:** M0 foundation.
 - **Completed:** M1 runtime inventory and stable contracts.
-- **Now:** M5 evaluation set and local outcome-history instrumentation implemented; F5 and real outcome collection pending.
-- **Next:** Validate the integrated M4/M4.5/M5 flow with `F5`, collect verified outcomes from the synthetic set, then assess routing by complexity and runtime before any recalibration.
+- **Completed:** M4/M4.5/M5/M6 implementation and integrated Extension Development Host validation (user-confirmed 2026-10-28).
+- **Now:** M7 — parallel execution of user-defined independent subtasks in isolated worktrees.
+- **Next:** Implement and validate M7; keep routing weights unchanged unless verified outcomes support recalibration.
 - **Later:** Evaluation-driven learning, automatic fallback and parallel agents.
 
 ## Now
@@ -153,7 +154,7 @@ Limitations: Codex's documented [`/usage` command](https://developers.openai.com
 
 ### M4 — Adaptive transparent router
 
-**Status:** Implementation complete; M4-specific Extension Development Host validation pending (2026-10-28)
+**Status:** Validated by user in Extension Development Host (2026-10-28)
 
 Outcome: one ChePrompt submission is routed across OpenCode Go, Claude Code and ChatGPT/Codex according to task fit, expected usage, context needs, capabilities, availability and expiration.
 
@@ -174,11 +175,11 @@ Definition of done:
 
 Result: `routePrompt` now scores only discovered, eligible candidates across OpenCode Go, Claude Code and Codex. It returns a deterministic score breakdown, selected allowance pool, fresh official allowance details when available, confidence and ranked alternatives. Extension discovery completes before analysis; refreshing inventory or usage re-evaluates the pending route without executing it. Manual override updates the displayed decision and still requires explicit execution approval. The Codex subscription and API-key pools remain distinct.
 
-Limitations: scoring weights and task-signal heuristics are initial hypotheses, not evaluated quality claims; M5 will measure outcomes before recalibration. Claude/Codex context and exact usage remain unknown when their official surfaces do not report them. The user should validate the new automatic cross-runtime selection, score display, manual override/review, runtime execution and refreshed-allowance rerouting with F5 before M4 is marked fully validated.
+Limitations: scoring weights and task-signal heuristics remain hypotheses, not evaluated quality claims. Claude/Codex context and exact usage remain unknown when their official surfaces do not report them. Keep weights unchanged unless verified outcomes support recalibration.
 
 ### M4.5 — Terminal-inspired fluorescent UI
 
-**Status:** Implementation complete; Extension Development Host validation pending (2026-10-28)
+**Status:** Validated by user in Extension Development Host (2026-10-28)
 
 Outcome: ChePrompt presents routing, allowances and execution in a compact dark interface inspired by OpenCode's terminal UI, with a distinct hornero identity and restrained fluorescent accents.
 
@@ -193,18 +194,18 @@ Definition of done:
 - [x] Keep streaming output, cancellation and interactive approval fallback in the same visual language.
 - [x] Add subtle Argentine microcopy and the hornero mark without compromising technical clarity.
 - [x] Meet WCAG AA contrast, visible keyboard focus, reduced-motion behavior and non-color status cues.
-- [ ] Validate narrow sidebar widths, a wider panel and 200% zoom in Extension Development Host.
+- [x] Validate narrow sidebar widths, a wider panel and 200% zoom in Extension Development Host.
 - [x] Add UI regression coverage for the main idle, routing, executing, approval, unavailable and error states.
 
 Result: The panel now uses the graphite/flúor/hornero token system, a compact per-pool allowance strip, a prominent `Dale` composer with `Cmd/Ctrl + Enter`, a score-and-alternatives route card, and a chronological execution surface. Statuses have text labels in addition to color; focus, reduced-motion and AA token contrast are covered, and UI logic has VM-based regression tests.
 
-Limitations: manual F5 validation is still needed for the combined automatic route and execution flow, sidebar widths, wider panel and 200% zoom. Scoring remains an initial hypothesis pending M5 evaluation.
+Limitations: scoring remains an initial hypothesis; keep weights unchanged unless verified outcomes support recalibration.
 
 ## Later
 
 ### M5 — Evaluation and outcome history
 
-**Status:** Evaluation set and local outcome-history instrumentation implemented; Extension Development Host validation and real outcome collection pending (2026-10-28)
+**Status:** Validated by user in Extension Development Host; representative synthetic outcomes collected (2026-10-28)
 
 - [x] Build a 20-task synthetic evaluation set stratified across simple, standard and complex tasks.
 - [x] Record selected runtime/model, allowance pool, routing reason, score, latency, reported token usage, CLI-reported retries and execution status.
@@ -214,23 +215,35 @@ Limitations: manual F5 validation is still needed for the combined automatic rou
 
 Result: A 20-case synthetic set (5 simple, 10 standard, 5 complex) can be loaded manually from the panel. Each completed execution creates a local history record with route metadata, latency, token counts only when the official CLI reports them, retries only when reported, execution result and a user-entered verification outcome. History is capped at 100 records and never stores the submitted prompt. No automatic provider calls or LLM judge are used by the benchmark.
 
-Limitations: there are no real evaluation outcomes yet. The user must run representative cases and mark their verification results in Extension Development Host; do not recalibrate the router from the synthetic set's routing scores alone.
+Limitations: the synthetic set is not proof of optimal routing. Keep weights unchanged unless verified outcome evidence supports recalibration.
 
 ### M6 — Escalation and fallback
 
-**Status:** Not started
+**Status:** Validated by user in Extension Development Host (2026-10-28)
 
-- Escalate only on objective failure: tests, build, tool error or explicit low confidence.
-- Prevent retry loops with a hard attempt and usage budget.
-- Explain every fallback in the UI.
+- [x] Classify authentication, quota, tool, process, protocol and approval failures; only objective runtime failures or a user-marked verification failure propose a fallback. Low confidence (<65%) is surfaced for human review.
+- [x] Cap each analyzed task at two ChePrompt executions total (initial run plus at most one fallback); do not retry cancelled, approval-pending or protocol-failure executions automatically.
+- [x] Recompute the fallback route from currently eligible candidates and fresh official allowance constraints; show `Not available` when a quota is unknown rather than treating it as zero.
+- [x] Explain the failure cause, proposed runtime/model, allowance pool and remaining attempt budget; require explicit review and execution approval before fallback.
+- [x] Validate objective fallback, approval/cancel exclusions, attempt-budget exhaustion and low-confidence notice in Extension Development Host.
+
+Result: Failure kinds are normalized in the shared execution result. A failed execution can propose one alternate route, but never starts it automatically; the user reviews the new decision and presses the main execute action. A successful run closes the task cycle. The hard budget is two ChePrompt executions per analysis, with exhausted/unknown provider allowance still governed by official pool data when available.
+
+Limitations: the budget limits ChePrompt execution attempts, not provider billing units. It does not estimate cost or quota from local token counts; if the provider does not report remaining allowance, the UI says `Not available` and the user must review the fallback. Real verification outcomes have not yet been collected, so routing weights remain unchanged.
 
 ### M7 — Parallel agents and worktrees
 
-**Status:** Not started
+**Status:** In progress; scope agreed, implementation not yet complete (2026-10-28)
 
-- Add parallel execution only for independent tasks with measurable benefit.
-- Isolate editing agents in Git worktrees.
-- Keep one parent decision record for cost and result attribution.
+- [ ] Let the user define and review at least two independent subtasks before execution; do not auto-decompose the parent prompt.
+- [ ] Route and execute reviewed subtasks concurrently with a conservative concurrency cap and explicit approval; never enable blanket auto-approval.
+- [ ] Create one Git worktree per subtask from a clean repository state; block safely when the workspace is dirty or is not a Git repository.
+- [ ] Keep worktrees isolated and available for inspection; do not auto-merge or delete them.
+- [ ] Persist one parent run record linking child routes/results and aggregate officially reported usage without storing raw prompts.
+- [ ] Show per-child status and report wall-clock duration alongside summed child durations as an observed parallelism indicator, not a guaranteed speedup.
+- [ ] Add tests for task validation, worktree lifecycle, concurrency, cancellation, record privacy and aggregation.
+
+Scope decision: M7 starts with explicit user-authored subtasks. ChePrompt will not invent a decomposition or merge agent changes automatically.
 
 ## Explicit non-goals for the current phase
 

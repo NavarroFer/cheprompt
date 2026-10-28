@@ -4,6 +4,7 @@ import {
   RoutingDecision,
   RoutingProfile,
   RuntimeExecutionResult,
+  RuntimeFailureKind,
   RuntimeModel,
   UsageSnapshot,
 } from "./types";
@@ -76,12 +77,16 @@ export interface EvaluationRecord {
   routingReason: string;
   routingScore: number;
   executionStatus: RuntimeExecutionResult["status"];
+  failureKind?: RuntimeFailureKind;
+  fallbackFromRuntime?: string;
   latencyMs: number;
   inputTokens?: number;
   outputTokens?: number;
   usageSource?: string;
+  /** Retried execution starts performed by ChePrompt for this analyzed task. */
+  chepromptRetries: number;
   /** CLI-reported retry events, or null when the runtime does not report them. */
-  retries: number | null;
+  runtimeRetries: number | null;
   verificationOutcome: VerificationOutcome;
   verifiedAt?: string;
 }
@@ -125,6 +130,7 @@ export function createEvaluationRecord(
   decision: RoutingDecision,
   result: RuntimeExecutionResult,
   startedAt: number,
+  chepromptRetries = 0,
   recordedAt = Date.now(),
 ): EvaluationRecord {
   const evaluationCase = evaluationCaseForPrompt(prompt);
@@ -144,11 +150,16 @@ export function createEvaluationRecord(
     routingReason: decision.reason,
     routingScore: decision.selectedScore.total,
     executionStatus: result.status,
+    ...(result.failureKind ? { failureKind: result.failureKind } : {}),
+    ...(decision.routingNotice?.kind === "fallback" && decision.routingNotice.fromRuntimeId
+      ? { fallbackFromRuntime: decision.routingNotice.fromRuntimeId }
+      : {}),
     latencyMs: Math.max(0, Math.round(recordedAt - startedAt)),
     ...(inputTokens === undefined ? {} : { inputTokens }),
     ...(outputTokens === undefined ? {} : { outputTokens }),
     ...(inputTokens === undefined && outputTokens === undefined ? {} : { usageSource: result.usage?.source }),
-    retries: result.retries === undefined ? null : Math.max(0, Math.floor(result.retries)),
+    chepromptRetries: Math.max(0, Math.floor(chepromptRetries)),
+    runtimeRetries: result.retries === undefined ? null : Math.max(0, Math.floor(result.retries)),
     verificationOutcome: "unverified",
   };
 }
@@ -178,8 +189,19 @@ export function updateVerificationOutcome(
 export function loadEvaluationHistory(value: unknown): EvaluationRecord[] {
   if (!Array.isArray(value)) return [];
   return value
+    .map(migrateEvaluationRecord)
     .filter(isEvaluationRecord)
     .slice(-MAX_EVALUATION_RECORDS);
+}
+
+function migrateEvaluationRecord(value: unknown): unknown {
+  if (!isRecord(value) || "chepromptRetries" in value || !("retries" in value)) return value;
+  const { retries, ...record } = value;
+  return {
+    ...record,
+    chepromptRetries: 0,
+    runtimeRetries: typeof retries === "number" ? retries : null,
+  };
 }
 
 function isEvaluationRecord(value: unknown): value is EvaluationRecord {
@@ -187,8 +209,8 @@ function isEvaluationRecord(value: unknown): value is EvaluationRecord {
   const allowedKeys = new Set([
     "id", "recordedAt", "evaluationCaseId", "evaluationCaseTitle", "complexity", "profile",
     "runtimeId", "providerId", "modelId", "modelLabel", "allowancePoolId", "routingReason",
-    "routingScore", "executionStatus", "latencyMs", "inputTokens", "outputTokens", "usageSource",
-    "retries", "verificationOutcome", "verifiedAt",
+    "routingScore", "executionStatus", "failureKind", "fallbackFromRuntime", "latencyMs", "inputTokens", "outputTokens", "usageSource",
+    "chepromptRetries", "runtimeRetries", "verificationOutcome", "verifiedAt",
   ]);
   if (Object.keys(value).some((key) => !allowedKeys.has(key))) return false;
   return typeof value.id === "string"
@@ -206,12 +228,16 @@ function isEvaluationRecord(value: unknown): value is EvaluationRecord {
     && typeof value.routingScore === "number"
     && Number.isFinite(value.routingScore)
     && ["succeeded", "failed", "cancelled"].includes(String(value.executionStatus))
+    && (value.failureKind === undefined || ["authentication", "quota", "tool", "process", "approval", "protocol", "unknown"].includes(String(value.failureKind)))
+    && (value.fallbackFromRuntime === undefined || typeof value.fallbackFromRuntime === "string")
     && typeof value.latencyMs === "number"
     && Number.isFinite(value.latencyMs)
     && (value.inputTokens === undefined || safeTokenCount(value.inputTokens) !== undefined)
     && (value.outputTokens === undefined || safeTokenCount(value.outputTokens) !== undefined)
     && (value.usageSource === undefined || typeof value.usageSource === "string")
-    && (value.retries === null || (typeof value.retries === "number" && Number.isFinite(value.retries)))
+    && typeof value.chepromptRetries === "number"
+    && Number.isFinite(value.chepromptRetries)
+    && (value.runtimeRetries === null || (typeof value.runtimeRetries === "number" && Number.isFinite(value.runtimeRetries)))
     && (value.verifiedAt === undefined || typeof value.verifiedAt === "string")
     && ["unverified", "passed", "failed", "not-run"].includes(String(value.verificationOutcome));
 }
