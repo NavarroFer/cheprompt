@@ -57,8 +57,8 @@ Exact next action: integrate the M3.5 Codex adapter being developed in an isolat
 
 | Runtime/provider | Current state | Eligibility rule |
 | --- | --- | --- |
-| OpenCode Go | Connected | Eligible while authenticated and within its usage limits. |
-| ChatGPT | Not connected | User reports subscription ends 2026-11-21; exclude after that date unless renewed. |
+| OpenCode Go | Connected; current catalog includes DeepSeek V4.1 Flash, DeepSeek V4 Pro and GPT models | Eligible while authenticated and within its Go usage limits. DeepSeek should use the `opencode-go/*` route, not a separately billed API route. |
+| ChatGPT/Codex | Adapter in progress | User reports subscription ends 2026-11-21; exclude after that date unless renewed. |
 | Claude Pro | Subscription exists; Claude Code 2.1.312 installed but not authenticated | Authenticate and execute only through official Claude Code, never through OpenCode subscription plugins. |
 | Anthropic API | Not configured | Eligible only if the user separately adds a paid API key. |
 
@@ -79,6 +79,10 @@ OpenCode authentication was last checked with `opencode auth list`; only `OpenCo
 ## Architectural decisions
 
 - ChePrompt is a meta-router across runtimes, not merely an OpenCode model picker.
+- ChePrompt remains the only prompt surface: provider/model selection is automatic by default and execution/output return to the same panel.
+- The M4 candidate set spans DeepSeek and GPT models from OpenCode Go, Claude Pro through Claude Code, and GPT through ChatGPT/Codex.
+- Model identity includes its runtime and allowance pool; `opencode-go/gpt-*` usage must not be conflated with ChatGPT/Codex subscription usage.
+- DeepSeek V4.1 Flash is eligible through `opencode-go/deepseek-v4.1-flash`, so it does not require a separate DeepSeek API account for this user.
 - Use adapters so OpenCode and Claude Code share one execution contract.
 - Perform initial routing locally to avoid spending tokens on model selection.
 - Optimize expected successful completion under a usage budget, not raw first-call price.

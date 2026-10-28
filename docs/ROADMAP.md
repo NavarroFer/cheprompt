@@ -8,6 +8,16 @@ ChePrompt is the only prompt surface the user needs. It discovers eligible AI ru
 
 The router optimizes expected successful completion, not the cheapest first call. A cheap attempt followed by repeated corrections can cost more than choosing a stronger model once.
 
+### Single-prompt contract
+
+- The user always writes the task in ChePrompt; selecting a provider is not required in the default flow.
+- The router compares eligible candidates across runtimes, not only models within OpenCode.
+- OpenCode Go contributes its discovered catalog, including DeepSeek and GPT models covered by the Go allowance.
+- Claude Pro participates through the official Claude Code runtime.
+- ChatGPT/Codex participates through its official authenticated runtime once M3.5 is complete.
+- A candidate is identified by runtime, provider, model and allowance pool so similarly named GPT models do not incorrectly share quota state.
+- The chosen runtime/model, reason, allowance source and alternatives remain visible, with manual override available.
+
 ## Status overview
 
 - **Completed:** M0 foundation.
@@ -139,11 +149,15 @@ Definition of done:
 
 **Status:** Not started
 
-Outcome: routing considers task fit, expected usage, context needs, capabilities, availability and expiration.
+Outcome: one ChePrompt submission is routed across OpenCode Go, Claude Code and ChatGPT/Codex according to task fit, expected usage, context needs, capabilities, availability and expiration.
 
 Definition of done:
 
 - [ ] Replace the three-model hardcoded decision with scoring over discovered candidates.
+- [ ] Score across runtime boundaries: OpenCode Go, Claude Code and ChatGPT/Codex must compete in one candidate set.
+- [ ] Include discovered OpenCode Go models such as `opencode-go/deepseek-v4.1-flash`, `opencode-go/deepseek-v4-pro` and eligible GPT models instead of limiting the catalog to Luna, Argon and Kimi.
+- [ ] Treat each runtime/provider allowance pool independently even when two candidates belong to the same model family.
+- [ ] Keep provider selection automatic in the default flow: the user submits one prompt and receives one routed execution in ChePrompt.
 - [ ] Keep routing local and deterministic by default so selection itself spends no tokens.
 - [ ] Show score components, selected runtime/model and two alternatives.
 - [ ] Support `economy`, `balanced` and `quality` policies.
