@@ -214,6 +214,7 @@ p {
 .composer,
 .decision,
 .execution,
+.parallel-panel,
 .inventory {
   min-width: 0;
   margin-top: 12px;
@@ -225,6 +226,93 @@ p {
 
 .composer {
   border-top-color: var(--cp-hornero);
+}
+
+.parallel-panel {
+  border-top-color: var(--cp-magenta);
+}
+
+.parallel-panel > label:not(.independence-confirmation) {
+  display: block;
+  margin: 9px 0 4px;
+  font-size: 12px;
+}
+
+.parallel-panel textarea {
+  min-height: 74px;
+  margin-bottom: 4px;
+}
+
+.independence-confirmation {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 9px 0;
+  color: var(--cp-warning);
+  font-size: 11px;
+}
+
+.independence-confirmation input {
+  flex: 0 0 auto;
+  margin: 2px 0 0;
+  accent-color: var(--cp-cyan);
+}
+
+.parallel-controls,
+.parallel-task-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  margin-top: 8px;
+}
+
+.parallel-plan,
+.parallel-results {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.parallel-task-card {
+  display: block;
+  padding: 9px;
+  border: 1px solid var(--cp-border);
+  border-radius: 6px;
+  background: var(--cp-surface-raised);
+}
+
+.parallel-task-card h3 {
+  margin: 0 0 5px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.parallel-task-status {
+  color: var(--cp-cyan);
+  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+  font-size: 11px;
+}
+
+.parallel-task-output {
+  max-height: 240px;
+  overflow: auto;
+  margin-top: 7px;
+  padding: 6px;
+  border-left: 2px solid var(--cp-cyan);
+  background: var(--cp-bg);
+}
+
+.parallel-task-output p {
+  margin: 3px 0;
+  font-size: 11px;
+}
+
+.worktree-path {
+  overflow-wrap: anywhere;
+  font-size: 10px;
 }
 
 .composer-heading {

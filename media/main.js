@@ -15,6 +15,16 @@ const overrideCandidateSelect = document.getElementById("override-candidate");
 const applyOverrideButton = document.getElementById("apply-override");
 const evaluationCaseSelect = document.getElementById("evaluation-case");
 const loadEvaluationCaseButton = document.getElementById("load-evaluation-case");
+const parallelTaskInputs = [document.getElementById("parallel-task-1"), document.getElementById("parallel-task-2")];
+const parallelIndependent = document.getElementById("parallel-independent");
+const analyzeParallelButton = document.getElementById("analyze-parallel");
+const executeParallelButton = document.getElementById("execute-parallel");
+const cancelParallelButton = document.getElementById("cancel-parallel");
+const parallelPlanPanel = document.getElementById("parallel-plan");
+const parallelStatus = document.getElementById("parallel-status");
+const parallelResults = document.getElementById("parallel-results");
+const parallelHistorySummary = document.getElementById("parallel-history-summary");
+const parallelHistoryList = document.getElementById("parallel-history-list");
 const evaluationHistorySummary = document.getElementById("evaluation-history-summary");
 const evaluationHistoryList = document.getElementById("evaluation-history-list");
 const verificationControls = document.getElementById("verification-controls");
@@ -55,6 +65,8 @@ let currentExecutionRuntime = "opencode";
 let latestDecision;
 let currentEvaluationRecordId;
 const evaluationCasesById = new Map();
+const parallelTaskElements = new Map();
+let parallelHistoryRecords = [];
 
 profileInput.value = document.body.dataset.defaultProfile || "balanced";
 
@@ -207,6 +219,53 @@ loadEvaluationCaseButton.addEventListener("click", () => {
   status.textContent = `Tarea “${evaluationCase.title}” cargada. Revisala y presioná Dale cuando quieras ejecutarla.`;
 });
 
+analyzeParallelButton.addEventListener("click", () => {
+  if (!parallelIndependent.checked) {
+    parallelStatus.dataset.state = "warning";
+    parallelStatus.textContent = "Confirmá que las subtareas son independientes.";
+    return;
+  }
+  parallelPlanPanel.replaceChildren();
+  parallelPlanPanel.classList.add("hidden");
+  parallelResults.replaceChildren();
+  parallelTaskElements.clear();
+  executeParallelButton.disabled = true;
+  analyzeParallelButton.disabled = true;
+  parallelStatus.dataset.state = "analyzing";
+  parallelStatus.textContent = "Enrutando cada subtarea por separado…";
+  vscode.postMessage({
+    type: "analyzeParallel",
+    tasks: parallelTaskInputs.map((input) => input.value),
+    profile: profileInput.value,
+    independenceConfirmed: true,
+  });
+});
+
+executeParallelButton.addEventListener("click", () => {
+  if (!parallelIndependent.checked) {
+    parallelStatus.dataset.state = "warning";
+    parallelStatus.textContent = "Volvé a confirmar que las subtareas son independientes.";
+    return;
+  }
+  executeParallelButton.disabled = true;
+  analyzeParallelButton.disabled = true;
+  cancelParallelButton.disabled = false;
+  parallelStatus.dataset.state = "running";
+  parallelStatus.textContent = "Preparando dos worktrees aislados. No se combinarán los cambios automáticamente.";
+  vscode.postMessage({
+    type: "executeParallel",
+    tasks: parallelTaskInputs.map((input) => input.value),
+    profile: profileInput.value,
+    independenceConfirmed: true,
+  });
+});
+
+cancelParallelButton.addEventListener("click", () => {
+  cancelParallelButton.disabled = true;
+  parallelStatus.textContent = "Cancelando ambas subtareas…";
+  vscode.postMessage({ type: "cancelParallel" });
+});
+
 verificationPassedButton.addEventListener("click", () => sendVerificationOutcome("passed"));
 verificationFailedButton.addEventListener("click", () => sendVerificationOutcome("failed"));
 verificationNotRunButton.addEventListener("click", () => sendVerificationOutcome("not-run"));
@@ -226,6 +285,63 @@ window.addEventListener("message", ({ data }) => {
     }
     evaluationCaseSelect.replaceChildren(...options);
     renderEvaluationHistory(data.records || []);
+    renderParallelHistory(data.parallelHistory || [], true);
+    return;
+  }
+
+  if (data.type === "parallelHistory") {
+    renderParallelHistory(data.records || [], true);
+    return;
+  }
+
+  if (data.type === "parallelPlan") {
+    renderParallelPlan(data);
+    executeParallelButton.disabled = !parallelIndependent.checked;
+    analyzeParallelButton.disabled = false;
+    parallelStatus.dataset.state = data.needsReview ? "warning" : "selected";
+    parallelStatus.textContent = data.needsReview
+      ? "La ruta o el cupo cambiaron. Revisá ambas rutas actualizadas antes de ejecutar."
+      : "Revisá el runtime, modelo y pool asignados a cada subtarea.";
+    return;
+  }
+
+  if (data.type === "parallelStarted") {
+    renderParallelExecution(data.record);
+    parallelStatus.dataset.state = "running";
+    parallelStatus.textContent = "Las dos subtareas están corriendo en worktrees separados. Las aprobaciones siguen bajo tu control.";
+    cancelParallelButton.disabled = false;
+    return;
+  }
+
+  if (data.type === "parallelEvent") {
+    renderParallelEvent(data);
+    return;
+  }
+
+  if (data.type === "parallelTaskCompleted") {
+    renderParallelTaskCompletion(data);
+    return;
+  }
+
+  if (data.type === "parallelCompleted") {
+    renderParallelRunSummary(data.record);
+    renderParallelHistory([data.record]);
+    cancelParallelButton.disabled = true;
+    analyzeParallelButton.disabled = false;
+    executeParallelButton.disabled = true;
+    parallelStatus.dataset.state = data.record.status === "succeeded" ? "available" : "warning";
+    parallelStatus.textContent = data.record.status === "succeeded"
+      ? "Ambas subtareas terminaron. Revisá manualmente los worktrees antes de integrar cambios."
+      : "La ejecución terminó con resultados parciales o fallidos. Revisá cada worktree.";
+    return;
+  }
+
+  if (data.type === "parallelError") {
+    analyzeParallelButton.disabled = false;
+    executeParallelButton.disabled = true;
+    cancelParallelButton.disabled = true;
+    parallelStatus.dataset.state = "error";
+    parallelStatus.textContent = data.message;
     return;
   }
 
@@ -592,6 +708,149 @@ function renderExecutionEvent(event) {
     line.textContent = label ? `${label} · ${event.message}` : event.message;
     executionOutput.append(line);
   }
+}
+
+function renderParallelPlan(data) {
+  const cards = (data.tasks || []).map((task) => {
+    const card = document.createElement("article");
+    card.className = "parallel-task-card";
+    const title = document.createElement("h3");
+    title.textContent = `Subtarea ${task.taskNumber}`;
+    const decision = task.decision;
+    const route = document.createElement("p");
+    route.textContent = `${decision.selected.label} · ${decision.selected.runtimeId}/${decision.selected.providerId} · ${decision.selected.id}`;
+    const pool = document.createElement("p");
+    pool.textContent = `Pool: ${decision.allowancePoolId} · puntaje ${decision.selectedScore.total.toFixed(0)}/100 · confianza ${Math.round(decision.confidence * 100)}%`;
+    const reason = document.createElement("p");
+    reason.textContent = decision.reason;
+    card.append(title, route, pool, reason);
+    return card;
+  });
+  parallelPlanPanel.replaceChildren(...cards);
+  parallelPlanPanel.classList.remove("hidden");
+}
+
+function renderParallelExecution(record) {
+  parallelTaskElements.clear();
+  const cards = (record.tasks || []).map((task) => {
+    const card = document.createElement("article");
+    card.className = "parallel-task-card";
+    const title = document.createElement("h3");
+    title.textContent = `Subtarea ${task.taskNumber} · ${task.runtimeId}/${task.modelId}`;
+    const taskStatus = document.createElement("p");
+    taskStatus.className = "parallel-task-status";
+    taskStatus.textContent = parallelStatusLabel(task.status);
+    const output = document.createElement("div");
+    output.className = "parallel-task-output";
+    card.append(title, taskStatus, output);
+    renderWorktreeControls(card, record.id, task);
+    parallelTaskElements.set(task.id, { card, taskStatus, output });
+    return card;
+  });
+  parallelResults.replaceChildren(...cards);
+}
+
+function renderParallelEvent(data) {
+  const elements = parallelTaskElements.get(data.taskId);
+  if (!elements) return;
+  const event = data.event || {};
+  if (event.type === "started") {
+    elements.taskStatus.textContent = `Ejecutando en ${data.runtimeId}…`;
+    return;
+  }
+  if (event.type === "text") {
+    const line = document.createElement("p");
+    line.className = "execution-text";
+    line.textContent = event.text || "";
+    elements.output.append(line);
+    return;
+  }
+  if (event.message) {
+    const line = document.createElement("p");
+    line.className = `execution-${event.type}`;
+    line.textContent = `${String(event.type || "info").replaceAll("_", " ").toUpperCase()} · ${event.message}`;
+    elements.output.append(line);
+  }
+}
+
+function renderParallelTaskCompletion(data) {
+  const elements = parallelTaskElements.get(data.taskId);
+  const task = data.record;
+  if (!elements || !task) return;
+  elements.taskStatus.textContent = `${parallelStatusLabel(task.status)}${task.latencyMs === undefined ? "" : ` · ${formatDuration(task.latencyMs)}`}`;
+  if (data.error) {
+    const error = document.createElement("p");
+    error.className = "execution-error";
+    error.textContent = data.error;
+    elements.output.append(error);
+  }
+}
+
+function renderParallelRunSummary(record) {
+  const summary = document.createElement("p");
+  const wall = record.wallClockMs === undefined ? "duración desconocida" : `tiempo total ${formatDuration(record.wallClockMs)}`;
+  const serial = record.summedTaskDurationMs === undefined ? "" : ` · suma de tareas ${formatDuration(record.summedTaskDurationMs)}`;
+  const saved = record.observedTimeSavedMs === undefined ? "" : ` · diferencia observada ${formatDuration(record.observedTimeSavedMs)}`;
+  const usage = record.reportedUsageTaskCount
+    ? ` · tokens informados: ${record.aggregateInputTokens ?? "—"} entrada / ${record.aggregateOutputTokens ?? "—"} salida (${record.reportedUsageTaskCount}/2 tareas reportaron uso)`
+    : " · tokens: no informados por los CLIs";
+  summary.textContent = `Resultado ${record.status} · ${wall}${serial}${saved}${usage}`;
+  parallelResults.prepend(summary);
+}
+
+function renderParallelHistory(records, replace = false) {
+  const byId = new Map(replace ? [] : parallelHistoryRecords.map((record) => [record.id, record]));
+  for (const record of records) byId.set(record.id, record);
+  parallelHistoryRecords = [...byId.values()].slice(-50).reverse();
+  parallelHistorySummary.textContent = parallelHistoryRecords.length
+    ? `${parallelHistoryRecords.length} ejecución(es) · se conservan metadatos, no prompts.`
+    : "Todavía no hay ejecuciones paralelas.";
+  parallelHistoryList.replaceChildren(...parallelHistoryRecords.map((record) => {
+    const item = document.createElement("li");
+    const wall = record.wallClockMs === undefined ? "en curso" : formatDuration(record.wallClockMs);
+    const label = document.createElement("span");
+    label.textContent = `${new Date(record.recordedAt).toLocaleString()} · ${record.status} · ${wall}`;
+    item.append(label);
+    for (const task of record.tasks || []) renderWorktreeControls(item, record.id, task);
+    return item;
+  }));
+}
+
+function renderWorktreeControls(container, runId, task) {
+  if (!task.worktreePath || task.worktreeRemoved) return;
+  const path = document.createElement("p");
+  path.className = "worktree-path mono";
+  path.textContent = `Worktree: ${task.worktreePath}`;
+  const open = document.createElement("button");
+  open.className = "compact secondary";
+  open.type = "button";
+  open.textContent = "Abrir carpeta";
+  open.addEventListener("click", () => vscode.postMessage({
+    type: "openParallelWorktree", runId, taskId: task.id,
+  }));
+  const remove = document.createElement("button");
+  remove.className = "compact secondary";
+  remove.type = "button";
+  remove.textContent = "Quitar worktree";
+  remove.addEventListener("click", () => vscode.postMessage({
+    type: "removeParallelWorktree", runId, taskId: task.id,
+  }));
+  container.append(path, open, remove);
+}
+
+function parallelStatusLabel(value) {
+  return ({
+    queued: "En cola",
+    running: "En ejecución",
+    succeeded: "Finalizada correctamente",
+    failed: "Falló",
+    cancelled: "Cancelada",
+  })[value] || "Estado desconocido";
+}
+
+function formatDuration(milliseconds) {
+  if (milliseconds < 1000) return `${Math.round(milliseconds)} ms`;
+  return `${(milliseconds / 1000).toFixed(1)} s`;
 }
 
 function renderUsageSnapshot(snapshot) {

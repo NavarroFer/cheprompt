@@ -23,6 +23,7 @@ class FakeElement {
   className = "";
   value = "";
   disabled = false;
+  checked = false;
 
   addEventListener(type: string, listener: Listener): void {
     this.listeners.set(type, listener);
@@ -34,6 +35,10 @@ class FakeElement {
 
   append(...children: FakeElement[]): void {
     this.children.push(...children);
+  }
+
+  prepend(...children: FakeElement[]): void {
+    this.children.unshift(...children);
   }
 
   focus(): void {}
@@ -59,7 +64,7 @@ function loadWebview(): {
       let element = elements.get(id);
       if (!element) {
         element = new FakeElement();
-        if (["decision", "execution", "claude-actions", "codex-actions"].includes(id)) {
+        if (["decision", "execution", "claude-actions", "codex-actions", "parallel-plan"].includes(id)) {
           element.classList.add("hidden");
         }
         elements.set(id, element);
@@ -228,6 +233,66 @@ test("execution status, streaming text and cancellation use accessible runtime c
     result: { status: "failed", error: "Codex informó un límite de uso." },
   });
   assert.equal(elements.get("execution-status")?.textContent, "Codex informó un límite de uso.");
+});
+
+test("parallel workflow requires an independence confirmation, reviews both routes, and keeps worktrees explicit", () => {
+  const { elements, messages, receive } = loadWebview();
+  elements.get("parallel-task-1")!.value = "Implementá la paginación del endpoint y agregá pruebas.";
+  elements.get("parallel-task-2")!.value = "Actualizá el manual del CLI con los argumentos actuales.";
+  elements.get("analyze-parallel")?.click();
+  assert.equal(messages.some((message) => message.type === "analyzeParallel"), false);
+
+  elements.get("parallel-independent")!.checked = true;
+  elements.get("analyze-parallel")?.click();
+  assert.equal(messages.at(-1)?.type, "analyzeParallel");
+  assert.equal((messages.at(-1)?.tasks as string[]).length, 2);
+  assert.equal(messages.at(-1)?.independenceConfirmed, true);
+
+  const decision = {
+    selected: codexModel,
+    selectedScore: score,
+    confidence: 0.81,
+    allowancePoolId: "chatgpt-codex",
+    reason: "Ruta independiente de prueba.",
+  };
+  receive({
+    type: "parallelPlan",
+    tasks: [
+      { id: "task-1", taskNumber: 1, decision },
+      { id: "task-2", taskNumber: 2, decision: { ...decision, selected: { ...codexModel, id: "codex-next" } } },
+    ],
+  });
+  assert.equal(elements.get("parallel-plan")?.children.length, 2);
+  assert.match(elements.get("parallel-plan")?.children[0]?.children[1]?.textContent ?? "", /Codex configurado/);
+  assert.equal(elements.get("execute-parallel")?.disabled, false);
+  elements.get("execute-parallel")?.click();
+  assert.equal(messages.at(-1)?.type, "executeParallel");
+
+  const record = {
+    id: "run-1",
+    recordedAt: "2026-10-28T00:00:00.000Z",
+    status: "running",
+    tasks: [
+      { id: "task-1", taskNumber: 1, runtimeId: "codex", modelId: "codex-default", status: "running", worktreePath: "/worktrees/task-1" },
+      { id: "task-2", taskNumber: 2, runtimeId: "codex", modelId: "codex-next", status: "running", worktreePath: "/worktrees/task-2" },
+    ],
+  };
+  receive({ type: "parallelStarted", record });
+  receive({ type: "parallelEvent", taskId: "task-1", runtimeId: "codex", event: { type: "text", text: "Listo" } });
+  assert.equal(elements.get("parallel-results")?.children[0]?.children[2]?.children[0]?.textContent, "Listo");
+  receive({
+    type: "parallelCompleted",
+    record: {
+      ...record,
+      status: "succeeded",
+      wallClockMs: 1000,
+      summedTaskDurationMs: 1700,
+      observedTimeSavedMs: 700,
+      reportedUsageTaskCount: 0,
+    },
+  });
+  assert.match(elements.get("parallel-results")?.children[0]?.textContent ?? "", /diferencia observada 700 ms/);
+  assert.equal(messages.some((message) => message.type === "removeParallelWorktree"), false);
 });
 
 test("synthetic evaluation tasks load locally and verification is recorded without prompt text", () => {

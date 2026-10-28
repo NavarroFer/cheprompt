@@ -23,8 +23,8 @@ The router optimizes expected successful completion, not the cheapest first call
 - **Completed:** M0 foundation.
 - **Completed:** M1 runtime inventory and stable contracts.
 - **Completed:** M4/M4.5/M5/M6 implementation and integrated Extension Development Host validation (user-confirmed 2026-10-28).
-- **Now:** M7 — parallel execution of user-defined independent subtasks in isolated worktrees.
-- **Next:** Implement and validate M7; keep routing weights unchanged unless verified outcomes support recalibration.
+- **Now:** M7 implementation complete; integrated Extension Development Host validation pending.
+- **Next:** Commit the tested M7 implementation atomically so the repo is clean, then press `F5` and validate the reviewed two-subtask flow, clean-repository gate, cancellation, retained worktrees, history privacy and cleanup controls.
 - **Later:** Evaluation-driven learning, automatic fallback and parallel agents.
 
 ## Now
@@ -233,17 +233,19 @@ Limitations: the budget limits ChePrompt execution attempts, not provider billin
 
 ### M7 — Parallel agents and worktrees
 
-**Status:** In progress; scope agreed, implementation not yet complete (2026-10-28)
+**Status:** Implementation complete; Extension Development Host validation pending (2026-10-28)
 
-- [ ] Let the user define and review at least two independent subtasks before execution; do not auto-decompose the parent prompt.
-- [ ] Route and execute reviewed subtasks concurrently with a conservative concurrency cap and explicit approval; never enable blanket auto-approval.
-- [ ] Create one Git worktree per subtask from a clean repository state; block safely when the workspace is dirty or is not a Git repository.
-- [ ] Keep worktrees isolated and available for inspection; do not auto-merge or delete them.
-- [ ] Persist one parent run record linking child routes/results and aggregate officially reported usage without storing raw prompts.
-- [ ] Show per-child status and report wall-clock duration alongside summed child durations as an observed parallelism indicator, not a guaranteed speedup.
-- [ ] Add tests for task validation, worktree lifecycle, concurrency, cancellation, record privacy and aggregation.
+- [x] Let the user define and review exactly two independent subtasks before execution; do not auto-decompose the parent prompt.
+- [x] Route and execute the reviewed pair concurrently with an explicit confirmation; never enable blanket auto-approval.
+- [x] Create one Git worktree per subtask from one pinned commit and a clean repository state; block safely when the workspace is dirty or is not a Git repository.
+- [x] Keep worktrees available for inspection; offer explicit open/remove actions and never auto-merge or delete them.
+- [x] Persist one parent run record linking child routes/results and aggregate officially reported usage without storing raw prompts.
+- [x] Show per-child status and compare wall-clock duration with summed child durations as an observed parallelism indicator, not a guaranteed speedup.
+- [x] Add tests for task validation, worktree lifecycle, interruption recovery, record privacy and aggregation.
+- [ ] Validate the full flow in Extension Development Host, including clean/dirty repository behavior and worktree inspection/removal.
 
 Scope decision: M7 starts with explicit user-authored subtasks. ChePrompt will not invent a decomposition or merge agent changes automatically.
+Implementation note: the first slice is deliberately capped at two subtasks. Parallel history is local and retains route/result metadata but never the subtask prompts. Worktrees persist until the user explicitly removes them.
 
 ## Explicit non-goals for the current phase
 

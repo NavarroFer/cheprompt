@@ -8,9 +8,9 @@ This file is the compact handoff for the next human or coding-agent session.
 
 M7 — Parallel agents and worktrees.
 
-Status: User confirms integrated M4/M4.5/M5/M6 Extension Development Host validation, responsive checks and representative synthetic outcomes are complete (2026-10-28). M7 scope is explicit user-authored independent subtasks, isolated worktrees, reviewed execution, and one parent record; implementation is in progress.
+Status: User confirms integrated M4/M4.5/M5/M6 Extension Development Host validation, responsive checks and representative synthetic outcomes are complete (2026-10-28). M7 implementation is complete; its new UI and real worktree lifecycle still need Extension Development Host validation.
 
-Exact next action: implement reviewed multi-subtask routing/execution with isolated worktrees and parent/child outcome attribution; retain worktrees for user review, never auto-merge, and run `npm run check` plus `npm test`.
+Exact next action: commit the tested M7 implementation atomically so the workspace is clean; then press `F5` and test explicit two-task review/execute, dirty/non-Git workspace blocking, output/worktree inspection, cancellation, explicit cleanup and prompt-free history.
 
 ## Repository state
 
@@ -25,9 +25,10 @@ Exact next action: implement reviewed multi-subtask routing/execution with isola
 - M4.5 visual implementation commit: `b3dee8a feat: apply terminal-inspired UI system`.
 - M5 synthetic evaluation set and local, prompt-free outcome history are implemented; user confirms representative cases were run and verified.
 - M6 failure classification, reviewed fallback and two-attempt budget are implemented and user-confirmed in Extension Development Host.
-- M7 explicit-subtask scope selected; implementation is in progress.
+- M7 implements exactly two user-authored independent subtasks, separate route review, parallel execution from one pinned commit, one detached worktree per task, cancellation, explicit open/remove controls, and local parent/child history without prompts.
+- M7 worktrees require a clean Git repo and persist in VS Code extension storage until explicitly removed; changes are not merged automatically.
 - Build/typecheck: passing (`npm run check`).
-- Tests: 66 passing, including cross-runtime scoring, fallback limits, webview regression and evaluation-history privacy/retention tests.
+- Tests: 75 passing, including parallel task validation, worktree safety, interruption recovery, route review, outcome aggregation and history privacy.
 - npm audit: no known vulnerabilities after removing the optional publishing dependency.
 - Distribution: local only; Marketplace publishing is out of scope.
 
@@ -59,7 +60,7 @@ Exact next action: implement reviewed multi-subtask routing/execution with isola
 
 - The current heuristic does not prove that it chooses the best model.
 - Runtime auth is checked through official CLIs, but model reachability is not independently validated; exact remaining usage is available only where an official provider surface reports it.
-- M7 parallel execution, worktree lifecycle, parent/child attribution and UI flow remain to be implemented and validated.
+- M7's integrated UI/runtime/worktree flow still needs manual Extension Development Host validation; automated tests do not launch provider CLIs or execute real parallel tasks.
 - The scoring matrix is still an initial hypothesis and does not prove optimal model choice; keep weights unchanged unless verified outcome evidence supports recalibration.
 - Historical usage, latency and task outcomes are not recorded.
 - Automatic fallback and multi-agent execution do not exist.
@@ -132,6 +133,8 @@ M4.5 implementation validation on 2026-10-28: `npm run check`, `npm test` (58 te
 M5 implementation validation on 2026-10-28: `npm run check`, `npm test` (63 tests), `node --check media/main.js` and `git diff --check` passed. The 20-case synthetic set is stratified 5/10/5; local history is capped at 100 and tested to reject prompt-bearing records. User confirms representative cases and verification outcomes were collected. Codex/Claude token counts are captured only when their official execution stream reports them; other usage and unreported retries remain unknown. No router weights were recalibrated.
 
 M6 implementation validation on 2026-10-28: `npm run check` passed; `npm test` passed (66 tests). User confirmed integrated F5 validation of objective fallback, approval/cancel exclusions, attempt-budget exhaustion and low-confidence notice. Fallback remains explicitly reviewed and never auto-starts.
+
+M7 implementation validation on 2026-10-28: `npm run check`, `npm test` (75 tests), `node --check media/main.js` and `git diff --check` passed. Tests use fake Git/runtime boundaries; no provider CLI was launched. F5 validation remains pending for UI review, real detached worktree creation, parallel streaming/cancellation, history and explicit cleanup. M6 was committed as `077fccc`; M7 changes are not yet committed.
 
 ## Session completion checklist
 

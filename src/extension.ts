@@ -8,6 +8,21 @@ import {
 import { CodexAdapter } from "./codex";
 import { canStartExecution, MAX_TASK_EXECUTION_ATTEMPTS, shouldProposeFallback } from "./fallback";
 import {
+  appendParallelHistory,
+  cancelPendingParallelTasks,
+  createParallelPlan,
+  createParallelRunRecord,
+  finishParallelRun,
+  loadParallelHistory,
+  markParallelWorktreeRemoved,
+  PARALLEL_HISTORY_KEY,
+  ParallelPlan,
+  ParallelRunRecord,
+  recoverInterruptedParallelHistory,
+  setParallelTaskStatus,
+  updateParallelTask,
+} from "./parallel";
+import {
   appendEvaluationRecord,
   createEvaluationRecord,
   EVALUATION_HISTORY_KEY,
@@ -24,6 +39,7 @@ import {
   RuntimeExecutionHandle,
 } from "./opencode";
 import { LOW_CONFIDENCE_THRESHOLD, routePrompt } from "./router";
+import { GitWorktreeManager } from "./worktree";
 import {
   RoutingDecision,
   RoutingProfile,
@@ -35,7 +51,11 @@ import {
 } from "./types";
 
 export function activate(context: vscode.ExtensionContext): void {
-  const provider = new ChePromptViewProvider(context.extensionUri, context.globalState);
+  const provider = new ChePromptViewProvider(
+    context.extensionUri,
+    context.globalState,
+    context.globalStorageUri.fsPath,
+  );
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider("cheprompt.sidebar", provider),
@@ -67,14 +87,28 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
   private fallbackProposed = false;
   private taskSucceeded = false;
   private latestEvaluationRecordId?: string;
+  private parallelPlan?: ParallelPlan;
+  private parallelHistory: ParallelRunRecord[];
+  private parallelRunRecord?: ParallelRunRecord;
+  private parallelRunStartedAt?: number;
+  private cancelParallelRequested = false;
+  private parallelLaunching = false;
+  private readonly parallelHandles = new Map<string, RuntimeExecutionHandle>();
+  private readonly worktreeManager = new GitWorktreeManager();
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly globalState: vscode.Memento,
+    private readonly globalStoragePath: string,
   ) {
     this.evaluationHistory = loadEvaluationHistory(
       globalState.get<unknown>(EVALUATION_HISTORY_KEY, []),
     );
+    const loadedParallelHistory = loadParallelHistory(globalState.get<unknown>(PARALLEL_HISTORY_KEY, []));
+    this.parallelHistory = recoverInterruptedParallelHistory(loadedParallelHistory);
+    if (this.parallelHistory.some((record, index) => record !== loadedParallelHistory[index])) {
+      void globalState.update(PARALLEL_HISTORY_KEY, this.parallelHistory);
+    }
   }
 
   resolveWebviewView(view: vscode.WebviewView): void {
@@ -100,7 +134,34 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
           type: "evaluationState",
           cases: evaluationCases,
           records: this.evaluationHistory,
+          parallelHistory: this.parallelHistory,
         });
+        return;
+      }
+
+      if (message.type === "analyzeParallel") {
+        await this.analyzeParallel(view.webview, message);
+        return;
+      }
+
+      if (message.type === "executeParallel") {
+        await this.executeParallel(view.webview, message);
+        return;
+      }
+
+      if (message.type === "cancelParallel") {
+        this.cancelParallelRequested = true;
+        for (const execution of this.parallelHandles.values()) execution.cancel();
+        return;
+      }
+
+      if (message.type === "openParallelWorktree") {
+        await this.openParallelWorktree(view.webview, message);
+        return;
+      }
+
+      if (message.type === "removeParallelWorktree") {
+        await this.removeParallelWorktree(view.webview, message);
         return;
       }
 
@@ -165,8 +226,8 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
 
       if (message.type === "analyze") {
         try {
-          if (this.activeExecution) {
-            throw new Error("Cancelá la ejecución actual antes de analizar otra tarea.");
+          if (this.activeExecution || this.parallelHandles.size > 0 || this.parallelLaunching) {
+            throw new Error("Cancelá las ejecuciones actuales antes de analizar otra tarea.");
           }
           await this.initialDiscovery;
           this.lastPrompt = undefined;
@@ -654,12 +715,314 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  private async analyzeParallel(webview: vscode.Webview, message: AnalyzeParallelMessage): Promise<void> {
+    try {
+      if (this.activeExecution || this.parallelHandles.size > 0 || this.parallelLaunching) {
+        throw new Error("Cancelá las ejecuciones actuales antes de analizar subtareas.");
+      }
+      if (!message.independenceConfirmed) {
+        throw new Error("Confirmá que las dos subtareas son independientes antes de analizarlas.");
+      }
+      await this.initialDiscovery;
+      if (!this.inventory) throw new Error("El inventario de modelos todavía no está disponible.");
+      this.parallelPlan = createParallelPlan(
+        message.tasks,
+        message.profile,
+        this.routingCandidates(),
+        Date.now(),
+        this.usageSnapshots,
+      );
+      await webview.postMessage({
+        type: "parallelPlan",
+        runId: this.parallelPlan.id,
+        tasks: this.parallelPlan.tasks.map((task, index) => ({
+          id: task.id,
+          taskNumber: index + 1,
+          decision: task.decision,
+        })),
+      });
+    } catch (error) {
+      this.parallelPlan = undefined;
+      await webview.postMessage({
+        type: "parallelError",
+        message: error instanceof Error ? error.message : "No se pudieron analizar las subtareas.",
+      });
+    }
+  }
+
+  private async executeParallel(webview: vscode.Webview, message: ExecuteParallelMessage): Promise<void> {
+    const plan = this.parallelPlan;
+    if (!plan) {
+      await webview.postMessage({ type: "parallelError", message: "Analizá y revisá las dos subtareas antes de ejecutarlas." });
+      return;
+    }
+    if (!message.independenceConfirmed) {
+      await webview.postMessage({ type: "parallelError", message: "Confirmá que las subtareas no dependen entre sí." });
+      return;
+    }
+    if (message.profile !== plan.profile || message.tasks.length !== plan.tasks.length
+      || message.tasks.some((task, index) => task.trim() !== plan.tasks[index].prompt)) {
+      this.parallelPlan = undefined;
+      await webview.postMessage({
+        type: "parallelError",
+        message: "Cambiaste una subtarea o el perfil. Volvé a analizar y revisar ambas rutas.",
+      });
+      return;
+    }
+    if (this.activeExecution || this.parallelHandles.size > 0 || this.parallelLaunching) {
+      await webview.postMessage({ type: "parallelError", message: "Ya hay una ejecución activa." });
+      return;
+    }
+
+    this.parallelLaunching = true;
+    this.cancelParallelRequested = false;
+    try {
+      const currentCandidates = this.routingCandidates();
+      const refreshedTasks = plan.tasks.map((task) => ({
+        ...task,
+        decision: routePrompt(task.prompt, plan.profile, currentCandidates, Date.now(), this.usageSnapshots),
+      }));
+      const changed = refreshedTasks.some((task, index) =>
+        decisionReviewSignature(task.decision) !== decisionReviewSignature(plan.tasks[index].decision));
+      if (changed) {
+        this.parallelPlan = { ...plan, tasks: refreshedTasks };
+        await webview.postMessage({
+          type: "parallelPlan",
+          runId: plan.id,
+          needsReview: true,
+          tasks: refreshedTasks.map((task, index) => ({ id: task.id, taskNumber: index + 1, decision: task.decision })),
+        });
+        return;
+      }
+
+      const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const repository = await this.worktreeManager.resolveCleanRepository(workspacePath);
+      const startedAt = Date.now();
+      this.parallelRunRecord = createParallelRunRecord(
+        plan,
+        new Date(startedAt).toISOString(),
+        repository.root,
+        repository.head,
+      );
+      this.parallelRunStartedAt = startedAt;
+      await this.persistParallelRecord(this.parallelRunRecord);
+      const worktrees: string[] = [];
+      for (const task of plan.tasks) {
+        if (this.cancelParallelRequested) throw new Error("Ejecución paralela cancelada antes de iniciar los agentes.");
+        const worktreePath = await this.worktreeManager.createWorktree(
+          repository.root,
+          this.globalStoragePath,
+          plan.id,
+          task.id,
+          repository.head,
+        );
+        worktrees.push(worktreePath);
+        this.parallelRunRecord = setParallelTaskStatus(this.parallelRunRecord!, task.id, "queued", worktreePath);
+        await this.persistParallelRecord(this.parallelRunRecord);
+      }
+
+      plan.tasks.forEach((task, index) => {
+        this.parallelRunRecord = setParallelTaskStatus(
+          this.parallelRunRecord!,
+          task.id,
+          "running",
+          worktrees[index],
+        );
+      });
+      if (this.cancelParallelRequested) {
+        this.parallelRunRecord = cancelPendingParallelTasks(this.parallelRunRecord!);
+        const cancelled = finishParallelRun(this.parallelRunRecord, Date.now() - startedAt);
+        this.parallelRunRecord = cancelled;
+        await this.persistParallelRecord(cancelled);
+        await webview.postMessage({ type: "parallelCompleted", record: cancelled });
+        return;
+      }
+      await this.persistParallelRecord(this.parallelRunRecord);
+      await webview.postMessage({ type: "parallelStarted", record: this.parallelRunRecord });
+
+      await Promise.all(plan.tasks.map((task, index) => this.startParallelTask(
+        webview,
+        task,
+        worktrees[index],
+      )));
+
+      if (this.parallelRunRecord) {
+        const finished = finishParallelRun(this.parallelRunRecord, Date.now() - startedAt);
+        this.parallelRunRecord = finished;
+        await this.persistParallelRecord(finished);
+        await webview.postMessage({ type: "parallelCompleted", record: finished });
+      }
+      this.parallelPlan = undefined;
+    } catch (error) {
+      if (this.parallelRunRecord?.status === "running" && this.parallelHandles.size === 0) {
+        const unfinished = this.parallelRunRecord.tasks.find((task) =>
+          (task.status === "queued" || task.status === "running") && !task.worktreePath,
+        ) ?? this.parallelRunRecord.tasks.find((task) => task.status === "queued" || task.status === "running");
+        if (unfinished) {
+          const interrupted = this.cancelParallelRequested
+            ? cancelPendingParallelTasks(this.parallelRunRecord)
+            : cancelPendingParallelTasks(updateParallelTask(this.parallelRunRecord, unfinished.id, {
+                executionId: randomUUID(),
+                status: "failed",
+                exitCode: -1,
+                error: "No se pudo preparar el worktree.",
+                failureKind: "process",
+              }, 0));
+          const finished = finishParallelRun(interrupted, Date.now() - (this.parallelRunStartedAt ?? Date.now()));
+          this.parallelRunRecord = finished;
+          await this.persistParallelRecord(finished);
+          await webview.postMessage({ type: "parallelCompleted", record: finished });
+        }
+      }
+      if (!this.cancelParallelRequested) {
+        await webview.postMessage({
+          type: "parallelError",
+          message: error instanceof Error ? error.message : "No se pudieron iniciar las subtareas paralelas.",
+        });
+      }
+    } finally {
+      this.cancelParallelRequested = false;
+      this.parallelLaunching = false;
+    }
+  }
+
+  private async startParallelTask(
+    webview: vscode.Webview,
+    task: ParallelPlan["tasks"][number],
+    worktreePath: string,
+  ): Promise<void> {
+    const runtime = task.decision.selected.runtimeId;
+    const startedAt = Date.now();
+    let execution: RuntimeExecutionHandle | undefined;
+    let result: RuntimeExecutionResult;
+    try {
+      if (!isRuntimeId(runtime)) throw new Error("El runtime seleccionado no es compatible.");
+      execution = this.startRuntimeExecution(runtime, task.prompt, task.decision, worktreePath, (event) => {
+        void webview.postMessage({
+          type: "parallelEvent",
+          runId: this.parallelRunRecord?.id,
+          taskId: task.id,
+          taskNumber: this.parallelRunRecord?.tasks.find((item) => item.id === task.id)?.taskNumber,
+          runtimeId: runtime,
+          event,
+        });
+      });
+      this.parallelHandles.set(task.id, execution);
+      result = await execution.result;
+    } catch {
+      result = {
+        executionId: execution?.executionId ?? randomUUID(),
+        status: "failed",
+        exitCode: -1,
+        error: "No se pudo completar la subtarea.",
+        failureKind: "process",
+      };
+    } finally {
+      this.parallelHandles.delete(task.id);
+    }
+
+    if (!this.parallelRunRecord) return;
+    const updated = updateParallelTask(this.parallelRunRecord, task.id, result!, Date.now() - startedAt, worktreePath);
+    this.parallelRunRecord = updated;
+    await this.persistParallelRecord(updated);
+    await webview.postMessage({
+      type: "parallelTaskCompleted",
+      runId: updated.id,
+      taskId: task.id,
+      taskNumber: updated.tasks.find((item) => item.id === task.id)?.taskNumber,
+      record: updated.tasks.find((item) => item.id === task.id),
+      error: result!.error,
+    });
+  }
+
+  private startRuntimeExecution(
+    runtime: "opencode" | "claude-code" | "codex",
+    prompt: string,
+    decision: RoutingDecision,
+    cwd: string,
+    onEvent: (event: RuntimeExecutionEvent) => void,
+  ): RuntimeExecutionHandle {
+    if (runtime === "opencode") {
+      return new OpenCodeExecutionAdapter(
+        vscode.workspace.getConfiguration("cheprompt").get<string>("opencodePath", "opencode"),
+      ).start(prompt, decision, cwd, onEvent);
+    }
+    if (runtime === "claude-code") {
+      if (this.claudeInventory?.runtime.availability !== "available" || !this.claudeAdapter) {
+        throw new Error("Claude Code dejó de estar disponible antes de iniciar la subtarea.");
+      }
+      return this.claudeAdapter.start(prompt, cwd, onEvent);
+    }
+    if (this.codexInventory?.runtime.availability !== "available" || !this.codexAdapter) {
+      throw new Error("Codex dejó de estar disponible antes de iniciar la subtarea.");
+    }
+    return this.codexAdapter.start(prompt, decision, cwd, onEvent);
+  }
+
+  private async persistParallelRecord(record: ParallelRunRecord): Promise<void> {
+    this.parallelHistory = appendParallelHistory(this.parallelHistory, record);
+    await this.globalState.update(PARALLEL_HISTORY_KEY, this.parallelHistory);
+  }
+
+  private async openParallelWorktree(
+    webview: vscode.Webview,
+    message: ParallelWorktreeMessage,
+  ): Promise<void> {
+    const task = this.findParallelTask(message.runId, message.taskId);
+    if (!task?.worktreePath || task.worktreeRemoved) {
+      await webview.postMessage({ type: "parallelError", message: "Ese worktree ya no está disponible." });
+      return;
+    }
+    try {
+      await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(task.worktreePath), { forceNewWindow: true });
+    } catch {
+      await webview.postMessage({ type: "parallelError", message: "No se pudo abrir el worktree en otra ventana." });
+    }
+  }
+
+  private async removeParallelWorktree(
+    webview: vscode.Webview,
+    message: ParallelWorktreeMessage,
+  ): Promise<void> {
+    const run = this.parallelHistory.find((record) => record.id === message.runId);
+    const task = run?.tasks.find((item) => item.id === message.taskId);
+    if (this.parallelHandles.has(message.taskId)) {
+      await webview.postMessage({ type: "parallelError", message: "Esperá a que termine o cancelá la subtarea antes de quitar su worktree." });
+      return;
+    }
+    if (!run?.repositoryRoot || !task?.worktreePath || task.worktreeRemoved) {
+      await webview.postMessage({ type: "parallelError", message: "Ese worktree ya no está disponible." });
+      return;
+    }
+    const choice = await vscode.window.showWarningMessage(
+      "Quitar este worktree elimina su carpeta. Revisá o guardá antes; Git bloqueará la acción si contiene cambios sin guardar.",
+      { modal: true },
+      "Quitar worktree",
+    );
+    if (choice !== "Quitar worktree") return;
+    try {
+      await this.worktreeManager.removeWorktree(run.repositoryRoot, this.globalStoragePath, task.worktreePath);
+      const updated = markParallelWorktreeRemoved(run, task.id);
+      await this.persistParallelRecord(updated);
+      await webview.postMessage({ type: "parallelHistory", records: this.parallelHistory });
+    } catch (error) {
+      await webview.postMessage({
+        type: "parallelError",
+        message: error instanceof Error ? error.message : "No se pudo quitar el worktree.",
+      });
+    }
+  }
+
+  private findParallelTask(runId: string, taskId: string) {
+    return this.parallelHistory.find((record) => record.id === runId)?.tasks.find((task) => task.id === taskId);
+  }
+
   private startExecution(webview: vscode.Webview, runtime: "opencode" | "claude-code" | "codex"): void {
-    if (!this.lastPrompt || !this.lastDecision || this.activeExecution) {
+    if (!this.lastPrompt || !this.lastDecision || this.activeExecution || this.parallelHandles.size > 0 || this.parallelLaunching) {
       void webview.postMessage({
         type: "executionError",
         runtimeId: runtime,
-        message: this.activeExecution
+        message: this.activeExecution || this.parallelHandles.size > 0 || this.parallelLaunching
           ? "Ya hay una tarea en ejecución. Cancelala antes de iniciar otra."
           : "Analizá la tarea antes de ejecutarla.",
       });
@@ -1046,6 +1409,27 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         </div>
       </section>
 
+      <details id="parallel-panel" class="parallel-panel inventory">
+        <summary>Dos subtareas independientes · worktrees aislados</summary>
+        <p>Definí exactamente dos tareas que no dependan entre sí. ChePrompt las enruta por separado, crea un worktree por tarea y no combina los cambios automáticamente. El repositorio debe estar limpio.</p>
+        <label for="parallel-task-1">Subtarea 1</label>
+        <textarea id="parallel-task-1" rows="4" placeholder="Ej.: Agregá paginación al endpoint de artículos y sus tests."></textarea>
+        <label for="parallel-task-2">Subtarea 2</label>
+        <textarea id="parallel-task-2" rows="4" placeholder="Ej.: Actualizá la documentación del CLI con los argumentos actuales."></textarea>
+        <label class="independence-confirmation">
+          <input id="parallel-independent" type="checkbox" />
+          Confirmo que ambas tareas son independientes y pueden ejecutarse desde el mismo commit.
+        </label>
+        <button id="analyze-parallel" class="compact secondary" type="button">Analizar ambas</button>
+        <div id="parallel-plan" class="parallel-plan hidden" aria-live="polite"></div>
+        <div class="parallel-controls">
+          <button id="execute-parallel" class="primary" type="button" disabled>Revisé las dos rutas · ejecutar</button>
+          <button id="cancel-parallel" class="secondary" type="button" disabled>Cancelar ambas</button>
+        </div>
+        <p id="parallel-status" class="status-line" role="status" aria-live="polite"></p>
+        <div id="parallel-results" class="parallel-results"></div>
+      </details>
+
       <p id="status" class="status-line" role="status" aria-live="polite"></p>
 
       <details id="inventory" class="inventory">
@@ -1125,6 +1509,12 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         <p id="evaluation-history-summary">Todavía no hay ejecuciones registradas.</p>
         <ol id="evaluation-history-list"></ol>
       </details>
+
+      <details id="parallel-history" class="inventory">
+        <summary>Historial de ejecuciones paralelas · sin prompts</summary>
+        <p id="parallel-history-summary">Todavía no hay ejecuciones paralelas.</p>
+        <ol id="parallel-history-list"></ol>
+      </details>
     </main>
 
     <footer>Scoring local con hipótesis iniciales. Revisá la ruta y el cupo antes de ejecutar.</footer>
@@ -1141,6 +1531,20 @@ type AnalyzeMessage = {
 };
 
 type ExecuteMessage = { type: "execute" };
+type AnalyzeParallelMessage = {
+  type: "analyzeParallel";
+  tasks: string[];
+  profile: RoutingProfile;
+  independenceConfirmed: boolean;
+};
+type ExecuteParallelMessage = {
+  type: "executeParallel";
+  tasks: string[];
+  profile: RoutingProfile;
+  independenceConfirmed: boolean;
+};
+type CancelParallelMessage = { type: "cancelParallel" };
+type ParallelWorktreeMessage = { type: "openParallelWorktree" | "removeParallelWorktree"; runId: string; taskId: string };
 type RefreshUsageMessage = { type: "refreshUsage" };
 type CancelExecutionMessage = { type: "cancelExecution" };
 type InteractiveFallbackMessage = { type: "interactiveFallback" };
@@ -1170,7 +1574,11 @@ function isWebviewMessage(value: unknown): value is
   | WebviewReadyMessage
   | VerificationOutcomeMessage
   | AnalyzeMessage
+  | AnalyzeParallelMessage
   | ExecuteMessage
+  | ExecuteParallelMessage
+  | CancelParallelMessage
+  | ParallelWorktreeMessage
   | RefreshUsageMessage
   | CancelExecutionMessage
   | InteractiveFallbackMessage
@@ -1204,9 +1612,33 @@ function isWebviewMessage(value: unknown): value is
   ) {
     return true;
   }
+  if (
+    candidate.type === "analyzeParallel" &&
+    Array.isArray(candidate.tasks) &&
+    candidate.tasks.every((task) => typeof task === "string") &&
+    ["economy", "balanced", "quality"].includes(String(candidate.profile)) &&
+    typeof candidate.independenceConfirmed === "boolean"
+  ) {
+    return true;
+  }
+  if (
+    candidate.type === "executeParallel" &&
+    Array.isArray(candidate.tasks) &&
+    candidate.tasks.every((task) => typeof task === "string") &&
+    ["economy", "balanced", "quality"].includes(String(candidate.profile)) &&
+    typeof candidate.independenceConfirmed === "boolean"
+  ) return true;
+  if (
+    ["openParallelWorktree", "removeParallelWorktree"].includes(String(candidate.type)) &&
+    typeof candidate.runId === "string" &&
+    typeof candidate.taskId === "string"
+  ) return true;
   if ([
     "webviewReady",
     "execute",
+    "cancelParallel",
+    "openParallelWorktree",
+    "removeParallelWorktree",
     "refreshUsage",
     "cancelExecution",
     "interactiveFallback",
