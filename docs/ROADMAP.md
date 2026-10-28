@@ -22,8 +22,8 @@ The router optimizes expected successful completion, not the cheapest first call
 
 - **Completed:** M0 foundation.
 - **Completed:** M1 runtime inventory and stable contracts.
-- **Now:** M3 implementation complete; Claude Pro sign-in and F5 validation pending. M3.5 adapter work is proceeding in parallel.
-- **Next:** Integrate M3.5, then M4 adaptive routing.
+- **Now:** M3.5 implementation integrated; Codex sign-in and F5 validation pending, along with the previously pending M1.5/M2/M3 UI checks.
+- **Next:** Validate M1.5/M2/M3/M3.5 together in the Extension Development Host; only then begin M4 adaptive routing and M4.5 terminal-inspired UI.
 - **Later:** Claude Code, ChatGPT/Codex, adaptive routing, evaluation-driven learning, automatic fallback and parallel agents.
 
 ## Now
@@ -129,25 +129,29 @@ Definition of done:
 
 Result: Claude Code is exposed as an explicit runtime choice after route review. The adapter checks the official CLI auth status, accepts only Claude subscription OAuth methods, filters API-key and third-party provider environment overrides, and streams `stream-json` events without automatic permission bypass. Auth/quota failures cool the runtime down for one minute.
 
-Limitations: no Claude Pro login or live execution was initiated. The user must complete the official login from the panel and test the M1.5/M2/M3 flows in Extension Development Host. M3.5 adapter implementation is being developed in an isolated worktree in parallel; M4 remains blocked on integration and final user validation.
+Limitations: no Claude Pro login or live execution was initiated. The user must complete the official login from the panel and test the M1.5/M2/M3/M3.5 flows in Extension Development Host. M4 remains blocked on final user validation.
 
 ### M3.5 — ChatGPT/Codex runtime
 
-**Status:** Adapter implementation in progress in an isolated worktree (2026-10-28)
+**Status:** Implementation integrated; Codex sign-in and manual F5 validation pending (2026-10-28)
 
 Outcome: ChePrompt can select the user's officially authenticated OpenAI coding runtime without copying account credentials.
 
 Definition of done:
 
-- [ ] Identify and document the supported official CLI/API integration for the user's ChatGPT/Codex subscription.
-- [ ] Implement an adapter behind the shared discovery and M2 execution contracts.
-- [ ] Detect authentication and quota failures without reading or exposing raw credentials.
-- [ ] Include exact remaining usage only if the official integration exposes it; otherwise show `Not available`.
-- [ ] Exclude the runtime after 2026-11-21 unless the subscription is renewed or a separate eligible OpenAI account is configured.
+- [x] Identify and document the supported official CLI/API integration for the user's ChatGPT/Codex subscription.
+- [x] Implement an adapter behind the shared discovery and M2 execution contracts.
+- [x] Detect authentication and quota failures without reading or exposing raw credentials.
+- [x] Include exact remaining usage only if the official integration exposes it; otherwise show `Not available`.
+- [x] Exclude the runtime after 2026-11-21 unless the subscription is renewed or a separate eligible OpenAI account is configured.
+
+Result: ChePrompt uses the official [Codex CLI authentication status](https://developers.openai.com/codex/auth) and `codex exec --json` with `--sandbox workspace-write --ask-for-approval on-request`, following OpenAI's [non-interactive mode](https://developers.openai.com/codex/non-interactive-mode). Credentials remain in Codex's official store; API-key environment overrides are removed consistently during discovery and execution. ChatGPT subscription and API-key usage are represented as separate allowance pools. Authentication and quota failures temporarily disable the runtime, and no raw process diagnostics or credentials are shown.
+
+Limitations: Codex's documented [`/usage` command](https://developers.openai.com/codex/developer-commands#view-account-usage-with-usage) reports token activity, not an exact remaining subscription percentage, so ChePrompt shows `Not available`. The ChatGPT subscription expiry defaults to 2026-11-22 UTC (the user's reported final subscription day is 2026-11-21); update `cheprompt.codex.chatgptSubscriptionExpiresAt` if renewed. Automated tests use fake processes only. The user must sign in through the official Codex CLI and validate the M1.5/M2/M3/M3.5 flows together in Extension Development Host before M3.5 is considered fully validated or M4 begins.
 
 ### M4 — Adaptive transparent router
 
-**Status:** Not started
+**Status:** Blocked on M1.5/M2/M3/M3.5 Extension Development Host validation
 
 Outcome: one ChePrompt submission is routed across OpenCode Go, Claude Code and ChatGPT/Codex according to task fit, expected usage, context needs, capabilities, availability and expiration.
 
@@ -165,6 +169,26 @@ Definition of done:
 - [ ] Allow a manual override without changing the default automatic flow.
 - [ ] Use fresh provider-reported remaining allowance as a routing constraint when available.
 - [ ] Never compare an unknown or locally inferred percentage as if it were an official quota value.
+
+### M4.5 — Terminal-inspired fluorescent UI
+
+**Status:** Design direction approved; implementation not started
+
+Outcome: ChePrompt presents routing, allowances and execution in a compact dark interface inspired by OpenCode's terminal UI, with a distinct hornero identity and restrained fluorescent accents.
+
+Design contract: [`docs/UI.md`](UI.md).
+
+Definition of done:
+
+- [ ] Implement the documented graphite, fluorescent-cyan, lime, magenta and hornero-terracotta token system without copying OpenCode assets or exact layouts.
+- [ ] Keep the prompt composer as the primary element and support `Cmd/Ctrl + Enter`.
+- [ ] Present allowance pools for OpenCode Go, Claude Pro and ChatGPT/Codex separately.
+- [ ] Show selected runtime/model, routing reason, allowance source, confidence and two alternatives before execution.
+- [ ] Keep streaming output, cancellation and interactive approval fallback in the same visual language.
+- [ ] Add subtle Argentine microcopy and the hornero mark without compromising technical clarity.
+- [ ] Meet WCAG AA contrast, visible keyboard focus, reduced-motion behavior and non-color status cues.
+- [ ] Validate narrow sidebar widths, a wider panel and 200% zoom in Extension Development Host.
+- [ ] Add UI regression coverage for the main idle, routing, executing, approval, unavailable and error states.
 
 ## Later
 

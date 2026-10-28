@@ -6,11 +6,11 @@ This file is the compact handoff for the next human or coding-agent session.
 
 ## Current milestone
 
-M3 — Claude Pro through Claude Code.
+M3.5 — ChatGPT/Codex runtime.
 
-Status: Implementation complete; Claude Pro sign-in and manual F5 validation pending (2026-10-28). M1.5/M2 visual checks also remain pending by the user's request to test everything later.
+Status: Adapter and panel integration complete; Codex sign-in and manual F5 validation pending (2026-10-28). Claude Pro sign-in and the M1.5/M2/M3 visual checks also remain pending.
 
-Exact next action: integrate the M3.5 Codex adapter being developed in an isolated worktree. Before declaring these milestones done, the user must sign in to Claude Pro through the official Claude Code terminal flow and validate M1.5, M2, M3 and M3.5 together with `F5`. Do not start M4 until integration and validation.
+Exact next action: in the Extension Development Host, complete official Claude Code and Codex ChatGPT sign-ins, then validate M1.5, M2, M3 and M3.5 together with `F5` (analyze → review → execute, cancellation, and runtime-specific status/usage). Do not start M4 until this validation passes.
 
 ## Repository state
 
@@ -20,9 +20,9 @@ Exact next action: integrate the M3.5 Codex adapter being developed in an isolat
 - M1.5 atomic commit: `feat: show provider usage limits`.
 - M2 implementation commit: `feat: stream OpenCode execution in panel`.
 - M3 implementation commit: `feat: add Claude Code runtime`.
-- M3.5 adapter: in progress in an isolated worktree; not yet integrated.
+- M3.5 adapter: integrated in the current working tree; no live Codex sign-in or Extension Development Host validation yet.
 - Build: passing.
-- Tests: 28 passing, including fake OpenCode/Claude process lifecycle, streaming, auth/quota, cancellation and malformed output.
+- Tests: 40 passing, including fake OpenCode/Claude/Codex process lifecycle, streaming, auth/quota, cancellation and credential redaction.
 - npm audit: no known vulnerabilities after removing the optional publishing dependency.
 - Distribution: local only; Marketplace publishing is out of scope.
 
@@ -40,6 +40,8 @@ Exact next action: integrate the M3.5 Codex adapter being developed in an isolat
 - Running executions can be cancelled; the interactive terminal fallback can attach to the same OpenCode session.
 - Claude Code 2.1.312 is installed from Anthropic's official native installer. Its adapter checks auth status without storing account details and the panel offers a user-initiated official login.
 - Claude Code execution uses the shared streaming event contract; auth/quota failures temporarily disable it. No remaining-usage percentage is estimated.
+- Codex CLI discovery uses `codex login status`; execution streams official JSONL events with workspace-write sandboxing and on-request approvals. API-key environment overrides are removed and ChatGPT/API usage pools are kept distinct.
+- Codex auth/quota failures temporarily disable the runtime. Codex usage is `Not available` because the official `/usage` command reports token activity, not an exact remaining percentage.
 - The CLI is never launched with `--auto`.
 - The project can be installed locally with `npm run install:local`.
 
@@ -49,7 +51,7 @@ Exact next action: integrate the M3.5 Codex adapter being developed in an isolat
 - Provider authentication and model reachability are not independently validated; usage is shown only when the official OpenCode usage API reports it.
 - M1.5 and M2 UI flows have not been exercised in Extension Development Host.
 - Claude Code is not authenticated with Claude Pro and has not been run against a live account.
-- ChatGPT is not connected to OpenCode.
+- Codex has not been signed in or run against a live ChatGPT account; runtime selection is explicit until M4.
 - Historical usage, latency and task outcomes are not recorded.
 - Automatic fallback and multi-agent execution do not exist.
 
@@ -58,7 +60,7 @@ Exact next action: integrate the M3.5 Codex adapter being developed in an isolat
 | Runtime/provider | Current state | Eligibility rule |
 | --- | --- | --- |
 | OpenCode Go | Connected; current catalog includes DeepSeek V4.1 Flash, DeepSeek V4 Pro and GPT models | Eligible while authenticated and within its Go usage limits. DeepSeek should use the `opencode-go/*` route, not a separately billed API route. |
-| ChatGPT/Codex | Adapter in progress | User reports subscription ends 2026-11-21; exclude after that date unless renewed. |
+| ChatGPT/Codex | Adapter integrated; live sign-in/F5 check pending | User reports subscription ends 2026-11-21; exclude after that date unless renewed. API-key authentication is a separate billing pool. |
 | Claude Pro | Subscription exists; Claude Code 2.1.312 installed but not authenticated | Authenticate and execute only through official Claude Code, never through OpenCode subscription plugins. |
 | Anthropic API | Not configured | Eligible only if the user separately adds a paid API key. |
 
@@ -82,7 +84,10 @@ OpenCode authentication was last checked with `opencode auth list`; only `OpenCo
 - ChePrompt remains the only prompt surface: provider/model selection is automatic by default and execution/output return to the same panel.
 - The M4 candidate set spans DeepSeek and GPT models from OpenCode Go, Claude Pro through Claude Code, and GPT through ChatGPT/Codex.
 - Model identity includes its runtime and allowance pool; `opencode-go/gpt-*` usage must not be conflated with ChatGPT/Codex subscription usage.
+- Use the official Codex CLI (`codex login status`, `codex exec --json`) only; keep credentials in its own store and remove API-key environment overrides for consistent discovery/execution.
+- Codex `/usage` token activity is not an exact remaining quota, so display `Not available` rather than estimating.
 - DeepSeek V4.1 Flash is eligible through `opencode-go/deepseek-v4.1-flash`, so it does not require a separate DeepSeek API account for this user.
+- The approved visual direction is a compact dark TUI inspired by OpenCode, using restrained fluorescent cyan, lime and magenta plus hornero terracotta; the concrete contract is in `docs/UI.md` and implementation belongs to M4.5.
 - Use adapters so OpenCode and Claude Code share one execution contract.
 - Perform initial routing locally to avoid spending tokens on model selection.
 - Optimize expected successful completion under a usage budget, not raw first-call price.
@@ -106,7 +111,9 @@ M1.5 validation on 2026-10-27: `npm run check`, `npm test` (15 tests), `node --c
 
 M2 validation on 2026-10-28: `npm run check`, `npm test` (19 tests), `node --check media/main.js` and `git diff --check` passed. Process tests use a fake spawner and never launch OpenCode. F5 validation remains pending.
 
-M3 validation on 2026-10-28: `npm run check`, `npm test` (28 tests), `node --check media/main.js` and `git diff --check` passed. Claude Code `2.1.312` installation verified with `claude --version`; no `claude auth status`, login, live request, or credential inspection was performed. Claude Pro sign-in and F5 validation remain pending.
+M3 validation on 2026-10-28: `npm run check`, `npm test` (29 tests), `node --check media/main.js` and `git diff --check` passed. Claude Code `2.1.312` installation verified with `claude --version`; no `claude auth status`, login, live request, or credential inspection was performed. Claude Pro sign-in and F5 validation remain pending.
+
+M3.5 implementation validation on 2026-10-28: `npm run check`, `npm test` (40 tests), `node --check media/main.js` and `git diff --check` passed. Codex CLI behavior is covered with fake processes; official references are OpenAI's [authentication](https://developers.openai.com/codex/auth), [non-interactive mode](https://developers.openai.com/codex/non-interactive-mode) and [`/usage` command](https://developers.openai.com/codex/developer-commands#view-account-usage-with-usage) docs. No live Codex auth status, login, execution or credential inspection was performed. Codex sign-in and combined F5 validation remain pending.
 
 ## Session completion checklist
 

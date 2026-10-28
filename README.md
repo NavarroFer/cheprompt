@@ -105,6 +105,7 @@ El plan de trabajo y el estado de continuidad viven en:
 - [`docs/ROADMAP.md`](docs/ROADMAP.md): hitos, prioridades y criterios de terminado.
 - [`docs/STATE.md`](docs/STATE.md): estado actual, restricciones y próximo paso exacto.
 - [`docs/OPENCODE.md`](docs/OPENCODE.md): instrucciones y prompts para continuar con OpenCode Go.
+- [`docs/UI.md`](docs/UI.md): contrato visual TUI, paleta flúor, componentes y accesibilidad.
 
 ## Licencia
 
