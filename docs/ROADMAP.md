@@ -22,8 +22,8 @@ The router optimizes expected successful completion, not the cheapest first call
 
 - **Completed:** M0 foundation.
 - **Completed:** M1 runtime inventory and stable contracts.
-- **Now:** M4 adaptive routing implementation complete; Extension Development Host validation pending.
-- **Next:** Validate M4's automatic cross-runtime route, review and override in the Extension Development Host; then begin M4.5 terminal-inspired UI.
+- **Now:** M4.5 terminal-inspired UI implementation complete; integral Extension Development Host validation pending for M4 and M4.5.
+- **Next:** Validate routing, allowance refresh, override, execution and responsive/accessibility states with `F5`; then begin M5 evaluation.
 - **Later:** Evaluation-driven learning, automatic fallback and parallel agents.
 
 ## Now
@@ -178,7 +178,7 @@ Limitations: scoring weights and task-signal heuristics are initial hypotheses, 
 
 ### M4.5 — Terminal-inspired fluorescent UI
 
-**Status:** Design direction approved; implementation not started
+**Status:** Implementation complete; Extension Development Host validation pending (2026-10-28)
 
 Outcome: ChePrompt presents routing, allowances and execution in a compact dark interface inspired by OpenCode's terminal UI, with a distinct hornero identity and restrained fluorescent accents.
 
@@ -186,15 +186,19 @@ Design contract: [`docs/UI.md`](UI.md).
 
 Definition of done:
 
-- [ ] Implement the documented graphite, fluorescent-cyan, lime, magenta and hornero-terracotta token system without copying OpenCode assets or exact layouts.
-- [ ] Keep the prompt composer as the primary element and support `Cmd/Ctrl + Enter`.
-- [ ] Present allowance pools for OpenCode Go, Claude Pro and ChatGPT/Codex separately.
-- [ ] Show selected runtime/model, routing reason, allowance source, confidence and two alternatives before execution.
-- [ ] Keep streaming output, cancellation and interactive approval fallback in the same visual language.
-- [ ] Add subtle Argentine microcopy and the hornero mark without compromising technical clarity.
-- [ ] Meet WCAG AA contrast, visible keyboard focus, reduced-motion behavior and non-color status cues.
+- [x] Implement the documented graphite, fluorescent-cyan, lime, magenta and hornero-terracotta token system without copying OpenCode assets or exact layouts.
+- [x] Keep the prompt composer as the primary element and support `Cmd/Ctrl + Enter`.
+- [x] Present allowance pools for OpenCode Go, Claude Pro and ChatGPT/Codex separately.
+- [x] Show selected runtime/model, routing reason, allowance source, confidence and two alternatives before execution.
+- [x] Keep streaming output, cancellation and interactive approval fallback in the same visual language.
+- [x] Add subtle Argentine microcopy and the hornero mark without compromising technical clarity.
+- [x] Meet WCAG AA contrast, visible keyboard focus, reduced-motion behavior and non-color status cues.
 - [ ] Validate narrow sidebar widths, a wider panel and 200% zoom in Extension Development Host.
-- [ ] Add UI regression coverage for the main idle, routing, executing, approval, unavailable and error states.
+- [x] Add UI regression coverage for the main idle, routing, executing, approval, unavailable and error states.
+
+Result: The panel now uses the graphite/flúor/hornero token system, a compact per-pool allowance strip, a prominent `Dale` composer with `Cmd/Ctrl + Enter`, a score-and-alternatives route card, and a chronological execution surface. Statuses have text labels in addition to color; focus, reduced-motion and AA token contrast are covered, and UI logic has VM-based regression tests.
+
+Limitations: manual F5 validation is still needed for the combined automatic route and execution flow, sidebar widths, wider panel and 200% zoom. Scoring remains an initial hypothesis pending M5 evaluation.
 
 ## Later
 

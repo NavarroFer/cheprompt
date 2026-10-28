@@ -12,7 +12,7 @@ Este repositorio contiene el MVP inicial:
 - perfiles Económico, Equilibrado y Máxima calidad;
 - clasificación local y determinística de complejidad;
 - decisión visible entre OpenCode Go, Claude Code y Codex, con puntaje, motivo, cupo y alternativas;
-- inventario local de runtimes, proveedores y modelos descubierto desde OpenCode;
+- inventario local de modelos OpenCode Go y estado de los CLIs oficiales de Claude Code y Codex;
 - ventanas oficiales de uso de OpenCode Go, con porcentaje restante y reinicio cuando el API lo informa;
 - ejecución con salida incremental en ChePrompt, cancelación y alternativa de terminal interactiva;
 - opción explícita de Claude Pro mediante el CLI oficial de Claude Code;
@@ -79,9 +79,9 @@ prompt → clasificación local → decisión explicada → confirmación → st
 
 1. Escribí la tarea.
 2. Elegí el perfil económico, equilibrado o calidad.
-3. Presioná **Analizar ruta**.
-4. Revisá el modelo y el motivo.
-5. Revisá el runtime/modelo elegido automáticamente y presioná **Ejecutar ruta elegida**; si preferís, elegí Claude Pro o Codex como override explícito. Para aprobaciones, abrí la terminal interactiva del runtime.
+3. Presioná **Dale** o usá `Cmd/Ctrl + Enter`.
+4. Revisá runtime/modelo, puntaje, cupo, motivo y alternativas.
+5. Presioná **Ejecutar ruta elegida**; si preferís, elegí un override y revisá la nueva ruta antes de ejecutar. Para aprobaciones, abrí la terminal interactiva del runtime.
 
 El router puntúa de forma local y determinística los candidatos descubiertos de los tres runtimes. Los puntajes son hipótesis iniciales, no una garantía de calidad. Las ventanas oficiales de OpenCode Go limitan el enrutamiento cuando están frescas; cupos desconocidos no se estiman ni se tratan como cero. La ejecución transmite eventos JSON de OpenCode, Claude Code o Codex al panel. ChePrompt no copia credenciales ni activa aprobaciones automáticas; Claude Pro se usa solo mediante el CLI oficial de Claude Code, y cada CLI conserva su autenticación en su almacén oficial.
 

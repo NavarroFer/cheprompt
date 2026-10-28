@@ -18,8 +18,10 @@ const inventoryModels = document.getElementById("inventory-models");
 const usageStatus = document.getElementById("usage-status");
 const usageWindows = document.getElementById("usage-windows");
 const refreshUsageButton = document.getElementById("refresh-usage");
+const opencodeAvailability = document.getElementById("opencode-availability");
 const claudeRuntimeStatus = document.getElementById("claude-runtime-status");
 const claudeUsageStatus = document.getElementById("claude-usage-status");
+const claudeAvailability = document.getElementById("claude-availability");
 const claudeActions = document.getElementById("claude-actions");
 const executeClaudeButton = document.getElementById("execute-claude");
 const claudeInteractiveButton = document.getElementById("claude-interactive");
@@ -27,12 +29,14 @@ const claudeLoginButton = document.getElementById("claude-login");
 const refreshClaudeButton = document.getElementById("refresh-claude");
 const codexRuntimeStatus = document.getElementById("codex-runtime-status");
 const codexUsageStatus = document.getElementById("codex-usage-status");
+const codexAvailability = document.getElementById("codex-availability");
 const codexActions = document.getElementById("codex-actions");
 const executeCodexButton = document.getElementById("execute-codex");
 const codexInteractiveButton = document.getElementById("codex-interactive");
 const codexLoginButton = document.getElementById("codex-login");
 const refreshCodexButton = document.getElementById("refresh-codex");
 let latestUsageSnapshot;
+let opencodeAvailable = false;
 let claudeAvailable = false;
 let claudeInstalled = false;
 let codexAvailable = false;
@@ -42,8 +46,17 @@ let latestDecision;
 
 profileInput.value = document.body.dataset.defaultProfile || "balanced";
 
+promptInput.addEventListener("keydown", (event) => {
+  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+    event.preventDefault();
+    analyzeButton.click();
+  }
+});
+
 analyzeButton.addEventListener("click", () => {
-  status.textContent = "Analizando complejidad, costo relativo y capacidad…";
+  analyzeButton.disabled = true;
+  status.dataset.state = "analyzing";
+  status.textContent = "Enrutando… Analizando tarea y disponibilidad.";
   latestDecision = undefined;
   decisionPanel.classList.add("hidden");
   claudeActions.classList.add("hidden");
@@ -77,6 +90,7 @@ executeButton.addEventListener("click", () => {
 
 executeClaudeButton.addEventListener("click", () => {
   executeClaudeButton.disabled = true;
+  status.dataset.state = "analyzing";
   status.textContent = "Aplicando Claude Pro como override; revisá la ruta antes de ejecutar.";
   vscode.postMessage({ type: "selectClaude" });
 });
@@ -94,6 +108,7 @@ claudeInteractiveButton.addEventListener("click", () => {
 
 executeCodexButton.addEventListener("click", () => {
   executeCodexButton.disabled = true;
+  status.dataset.state = "analyzing";
   status.textContent = "Aplicando Codex como override; revisá la ruta antes de ejecutar.";
   vscode.postMessage({ type: "selectCodex" });
 });
@@ -121,12 +136,16 @@ codexLoginButton.addEventListener("click", () => {
 
 refreshClaudeButton.addEventListener("click", () => {
   refreshClaudeButton.disabled = true;
+  status.dataset.state = "analyzing";
+  status.textContent = "Actualizando estado de Claude Pro…";
   claudeRuntimeStatus.textContent = "Consultando Claude Code…";
   vscode.postMessage({ type: "refreshClaude" });
 });
 
 refreshCodexButton.addEventListener("click", () => {
   refreshCodexButton.disabled = true;
+  status.dataset.state = "analyzing";
+  status.textContent = "Actualizando estado de Codex…";
   codexRuntimeStatus.textContent = "Consultando Codex CLI…";
   vscode.postMessage({ type: "refreshCodex" });
 });
@@ -147,7 +166,9 @@ cancelExecutionButton.addEventListener("click", () => {
 
 refreshUsageButton.addEventListener("click", () => {
   refreshUsageButton.disabled = true;
-  usageStatus.textContent = "Actualizando límites oficiales…";
+  status.dataset.state = "analyzing";
+  status.textContent = "Actualizando cupo oficial de OpenCode Go…";
+  usageStatus.textContent = "Consultando límites oficiales…";
   vscode.postMessage({ type: "refreshUsage" });
 });
 
@@ -160,13 +181,17 @@ applyOverrideButton.addEventListener("click", () => {
 
 window.addEventListener("message", ({ data }) => {
   if (data.type === "inventoryError") {
+    opencodeAvailable = false;
     inventoryStatus.textContent = data.message;
     status.textContent = data.message;
+    setStateChip(opencodeAvailability, "No disponible", "unavailable");
     return;
   }
 
   if (data.type === "inventory") {
     const { runtime, providers, models } = data.inventory;
+    opencodeAvailable = runtime.availability === "available";
+    setStateChip(opencodeAvailability, runtime.availability === "available" ? "Disponible" : "No disponible", runtime.availability);
     const providerNames = providers.map((provider) => provider.name).join(", ");
     inventoryStatus.textContent = `${runtime.name} · proveedores: ${providerNames} · ${models.length} modelo(s)`;
     inventoryModels.replaceChildren(
@@ -192,6 +217,7 @@ window.addEventListener("message", ({ data }) => {
     const runtime = data.inventory.runtime;
     claudeAvailable = runtime.availability === "available";
     claudeInstalled = runtime.installed === true;
+    setStateChip(claudeAvailability, availabilityLabel(runtime.availability), runtime.availability);
     refreshClaudeButton.disabled = false;
     claudeLoginButton.disabled = !claudeInstalled;
     claudeRuntimeStatus.textContent = runtime.message || (claudeAvailable
@@ -211,8 +237,8 @@ window.addEventListener("message", ({ data }) => {
 
   if (data.type === "claudeUsage") {
     claudeUsageStatus.textContent = data.snapshot.status === "available"
-      ? "Uso oficial disponible; consultar las ventanas reportadas."
-      : "Uso: Not available · Claude Code no informa un porcentaje oficial restante.";
+      ? "Uso oficial disponible; consultá las ventanas reportadas."
+      : "Uso exacto: No disponible · Claude Code no informa porcentaje restante.";
     return;
   }
 
@@ -220,6 +246,7 @@ window.addEventListener("message", ({ data }) => {
     const runtime = data.inventory.runtime;
     codexAvailable = runtime.availability === "available";
     codexInstalled = runtime.installed === true;
+    setStateChip(codexAvailability, availabilityLabel(runtime.availability), runtime.availability);
     refreshCodexButton.disabled = false;
     codexLoginButton.disabled = !codexInstalled;
     codexRuntimeStatus.textContent = runtime.message || (codexAvailable
@@ -233,8 +260,8 @@ window.addEventListener("message", ({ data }) => {
 
   if (data.type === "codexUsage") {
     codexUsageStatus.textContent = data.snapshot.status === "available"
-      ? "Uso oficial disponible; consultar las ventanas reportadas."
-      : "Uso: Not available · Codex CLI no expone un porcentaje restante exacto.";
+      ? "Uso oficial disponible; consultá las ventanas reportadas."
+      : "Uso exacto: No disponible · Codex no informa porcentaje restante.";
     return;
   }
 
@@ -258,7 +285,9 @@ window.addEventListener("message", ({ data }) => {
     executeCodexButton.disabled = !codexAvailable;
     codexInteractiveButton.disabled = !codexAvailable;
     cancelExecutionButton.disabled = true;
-    interactiveFallbackButton.disabled = latestDecision?.selected.runtimeId !== "opencode";
+    interactiveFallbackButton.disabled = !isRuntimeAvailable(latestDecision?.selected.runtimeId);
+    analyzeButton.disabled = false;
+    status.dataset.state = "warning";
     status.textContent = "El cupo o la ruta cambiaron. Revisá la nueva decisión antes de ejecutar.";
     return;
   }
@@ -275,7 +304,7 @@ window.addEventListener("message", ({ data }) => {
     claudeInteractiveButton.disabled = !claudeAvailable;
     executeCodexButton.disabled = !codexAvailable;
     codexInteractiveButton.disabled = !codexAvailable;
-    interactiveFallbackButton.disabled = data.runtimeId !== "opencode";
+    interactiveFallbackButton.disabled = !isRuntimeAvailable(data.runtimeId);
     if (result.status === "succeeded") {
       executionStatus.textContent = `${runtimeName} terminó correctamente.`;
     } else if (result.status === "cancelled") {
@@ -286,12 +315,14 @@ window.addEventListener("message", ({ data }) => {
     if (result.runtimeUnavailable) {
       if (data.runtimeId === "claude-code") {
         claudeAvailable = false;
+        setStateChip(claudeAvailability, "No disponible", "unavailable");
         executeClaudeButton.disabled = true;
         claudeInteractiveButton.disabled = true;
         claudeRuntimeStatus.textContent = "Claude Code quedó temporalmente no disponible por autenticación o cuota.";
       }
       if (data.runtimeId === "codex") {
         codexAvailable = false;
+        setStateChip(codexAvailability, "No disponible", "unavailable");
         executeCodexButton.disabled = true;
         codexInteractiveButton.disabled = true;
         codexRuntimeStatus.textContent = "Codex quedó temporalmente no disponible por autenticación o cuota.";
@@ -310,7 +341,7 @@ window.addEventListener("message", ({ data }) => {
     codexInteractiveButton.disabled = !codexAvailable;
     claudeLoginButton.disabled = !claudeInstalled;
     codexLoginButton.disabled = !codexInstalled;
-    interactiveFallbackButton.disabled = data.runtimeId !== "opencode";
+    interactiveFallbackButton.disabled = !isRuntimeAvailable(latestDecision?.selected.runtimeId);
     executionStatus.textContent = data.message;
     return;
   }
@@ -322,7 +353,7 @@ window.addEventListener("message", ({ data }) => {
     claudeInteractiveButton.disabled = !claudeAvailable;
     codexInteractiveButton.disabled = !codexAvailable;
     analyzeButton.disabled = false;
-    interactiveFallbackButton.disabled = false;
+    interactiveFallbackButton.disabled = !isRuntimeAvailable(latestDecision?.selected.runtimeId);
     cancelExecutionButton.disabled = true;
     executionStatus.textContent = "Terminal interactiva abierta. Las aprobaciones quedan bajo tu control.";
     return;
@@ -351,7 +382,9 @@ window.addEventListener("message", ({ data }) => {
   }
 
   if (data.type === "error") {
+    status.dataset.state = "error";
     status.textContent = data.message;
+    analyzeButton.disabled = false;
     applyOverrideButton.disabled = !latestDecision;
     executeClaudeButton.disabled = !latestDecision || !claudeAvailable;
     executeCodexButton.disabled = !latestDecision || !codexAvailable;
@@ -371,6 +404,7 @@ window.addEventListener("message", ({ data }) => {
 
   const decision = data.decision;
   latestDecision = decision;
+  analyzeButton.disabled = false;
   document.getElementById("complexity").textContent = decision.complexity;
   document.getElementById("confidence").textContent = `${Math.round(decision.confidence * 100)}% de confianza`;
   document.getElementById("model").textContent = decision.selected.label;
@@ -380,7 +414,7 @@ window.addEventListener("message", ({ data }) => {
   document.getElementById("impact").textContent = decision.selected.usageImpact;
   const allowance = document.getElementById("allowance");
   const allowanceValue = decision.remainingPercent === undefined
-    ? "Not available"
+    ? "No disponible"
     : `${decision.remainingPercent}% restante`;
   const allowanceSource = decision.allowanceSource
     ? ` · ${decision.allowanceSource}${decision.allowanceObservedAt === undefined ? "" : ` · consultado ${formatUsageTime(decision.allowanceObservedAt)}`}`
@@ -400,7 +434,7 @@ window.addEventListener("message", ({ data }) => {
     ...Object.entries(scoreLabels).map(([key, label]) => {
       const item = document.createElement("li");
       const value = decision.selectedScore[key];
-      item.textContent = `${label}: ${value === null ? "Not available" : `${Math.round(value)}/100`}`;
+      item.textContent = `${label}: ${value === null ? "No disponible" : `${Math.round(value)}/100`}`;
       return item;
     }),
   );
@@ -433,11 +467,12 @@ window.addEventListener("message", ({ data }) => {
   overrideCandidateSelect.replaceChildren(...overrideOptions);
   applyOverrideButton.disabled = false;
 
+  status.dataset.state = "selected";
   status.textContent = decision.manualOverride
     ? "Override aplicado. Revisá el nuevo runtime, cupo y puntaje antes de ejecutar."
     : "Ruta automática lista. Revisala antes de ejecutar.";
   executeButton.disabled = false;
-  interactiveFallbackButton.disabled = decision.selected.runtimeId !== "opencode";
+  interactiveFallbackButton.disabled = !isRuntimeAvailable(decision.selected.runtimeId);
   claudeActions.classList.remove("hidden");
   executeClaudeButton.disabled = !claudeAvailable;
   claudeInteractiveButton.disabled = !claudeAvailable;
@@ -468,7 +503,17 @@ function renderExecutionEvent(event) {
   if (event.message) {
     const line = document.createElement("p");
     line.className = `execution-${event.type}`;
-    line.textContent = event.message;
+    const labels = {
+      step: "PASO",
+      tool: "HERRAMIENTA",
+      diagnostic: "INFO",
+      approval_required: "APROBACIÓN",
+      error: "ERROR",
+      completed: "FINALIZÓ",
+      cancelled: "CANCELÓ",
+    };
+    const label = labels[event.type];
+    line.textContent = label ? `${label} · ${event.message}` : event.message;
     executionOutput.append(line);
   }
 }
@@ -480,17 +525,17 @@ function renderUsageSnapshot(snapshot) {
   const available = snapshot.status === "available" && snapshot.freshness === "fresh" && !stale;
   if (!available) {
     usageStatus.textContent = stale || snapshot.freshness === "stale"
-      ? "Not available · el dato quedó desactualizado; actualizá para consultar de nuevo."
+      ? "No disponible · el dato venció; actualizá para consultar de nuevo."
       : snapshot.status === "unknown"
-        ? "Not available · no se pudo validar una respuesta oficial; no se estima el saldo."
-        : "Not available · OpenCode no informó un porcentaje oficial para esta cuenta.";
+        ? "No disponible · no se validó una respuesta oficial; no se estima el saldo."
+        : "No disponible · OpenCode no informó un porcentaje oficial para esta cuenta.";
     usageWindows.replaceChildren();
     return;
   }
 
   const observed = formatUsageTime(snapshot.observedAt);
   usageStatus.textContent = `Fuente: ${snapshot.source} · última consulta: ${observed}`;
-  const labels = { rolling: "Rolling (5 horas)", weekly: "Semanal", monthly: "Mensual" };
+  const labels = { rolling: "Ventana móvil (5 h)", weekly: "Semanal", monthly: "Mensual" };
   usageWindows.replaceChildren(
     ...snapshot.windows.map((window) => {
       const item = document.createElement("li");
@@ -502,6 +547,24 @@ function renderUsageSnapshot(snapshot) {
 
 function formatUsageTime(timestamp) {
   return new Date(timestamp).toLocaleString("es-AR");
+}
+
+function setStateChip(element, label, state) {
+  element.textContent = label;
+  element.dataset.state = state;
+}
+
+function availabilityLabel(availability) {
+  if (availability === "available") return "Disponible";
+  if (availability === "expired") return "Vencido";
+  return "No disponible";
+}
+
+function isRuntimeAvailable(runtimeId) {
+  if (runtimeId === "opencode") return opencodeAvailable;
+  if (runtimeId === "claude-code") return claudeAvailable;
+  if (runtimeId === "codex") return codexAvailable;
+  return false;
 }
 
 setInterval(() => {

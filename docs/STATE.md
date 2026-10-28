@@ -6,11 +6,11 @@ This file is the compact handoff for the next human or coding-agent session.
 
 ## Current milestone
 
-M4 — Adaptive transparent router.
+M4.5 — Terminal-inspired fluorescent UI.
 
-Status: Cross-runtime routing implementation complete. User confirmed the integrated M1.5/M2/M3/M3.5 Extension Development Host flows, including OpenCode usage/execute, Claude execute and Codex execute. M4-specific F5 validation of automatic route selection, score review, manual override and allowance refresh remains pending (2026-10-28).
+Status: M4 cross-runtime router is committed and M4.5 visual implementation is complete. Integral F5 validation for routing and M4.5 visual/accessibility states remains pending (2026-10-28).
 
-Exact next action: press `F5` and validate M4's automatic cross-runtime selection, score/allowance explanation, manual override followed by review, and route recalculation after usage refresh. Keep one explicit execution confirmation before the selected runtime runs. Scoring remains an uncalibrated hypothesis until M5 evaluation.
+Exact next action: press `F5` and validate automatic cross-runtime selection, score/allowance explanation, manual override followed by review, route recalculation after usage refresh, runtime execution/cancellation, and the UI at narrow/wide widths and 200% zoom. Scoring remains an uncalibrated hypothesis until M5 evaluation.
 
 ## Repository state
 
@@ -21,9 +21,10 @@ Exact next action: press `F5` and validate M4's automatic cross-runtime selectio
 - M2 implementation commit: `feat: stream OpenCode execution in panel`.
 - M3 implementation commit: `feat: add Claude Code runtime`.
 - M3.5 adapter: integrated; user confirmed Codex ChatGPT sign-in and successful Codex execution smoke test. Claude Pro sign-in/execution smoke test also confirmed. User reports the combined M1.5/M2/M3/M3.5 Extension Development Host flow passed.
-- M4 cross-runtime routing is implemented in the current working tree; its own F5 validation is pending.
+- M4 implementation commit: `1640cea feat: add adaptive cross-runtime routing`.
+- M4.5 visual implementation is in the current working tree; integral F5 and responsive/accessibility checks are pending.
 - Build/typecheck: passing (`npm run check`).
-- Tests: 54 passing, including deterministic cross-runtime scoring, allowance-pool isolation, stale/unknown/malformed quota behavior, expiry filtering and adapter process tests.
+- Tests: 58 passing, including cross-runtime scoring and four webview regression tests for keyboard analysis, route review, execution states and design/accessibility tokens.
 - npm audit: no known vulnerabilities after removing the optional publishing dependency.
 - Distribution: local only; Marketplace publishing is out of scope.
 
@@ -55,6 +56,7 @@ Exact next action: press `F5` and validate M4's automatic cross-runtime selectio
 - The current heuristic does not prove that it chooses the best model.
 - Runtime auth is checked through official CLIs, but model reachability is not independently validated; exact remaining usage is available only where an official provider surface reports it.
 - M4's new automatic-routing, score display, manual override/review and quota-refresh flows still need F5 validation.
+- M4.5 responsive layout and visual contrast/focus behavior still need manual Extension Development Host validation at narrow/wide widths and 200% zoom.
 - The scoring matrix is an initial hypothesis and does not prove optimal model choice; M5 evaluation is not implemented.
 - Historical usage, latency and task outcomes are not recorded.
 - Automatic fallback and multi-agent execution do not exist.
@@ -120,7 +122,9 @@ M3 validation on 2026-10-28: `npm run check`, `npm test` (29 tests), `node --che
 
 M3.5 validation on 2026-10-28: `npm run check`, `npm test` (41 tests), `node --check media/main.js` and `git diff --check` passed. The user confirmed Codex ChatGPT sign-in and live execution; the auth parser handles CLI 0.165.0 status output on stderr. The user also confirmed the integrated M1.5/M2/M3/M3.5 Extension Development Host checks.
 
-M4 implementation validation on 2026-10-28: `npm run check`, `npm test` (54 tests), `node --check media/main.js` and `git diff --check` passed. Router tests cover deterministic cross-runtime scoring, score explanations, profiles, expiry, isolated allowance pools, limited flags and unknown/stale/malformed official usage. M4 F5 validation is the remaining step; routing weights remain uncalibrated until M5.
+M4 implementation validation on 2026-10-28: `npm run check`, `npm test` (54 tests), `node --check media/main.js` and `git diff --check` passed. Router tests cover deterministic cross-runtime scoring, score explanations, profiles, expiry, isolated allowance pools, limited flags and unknown/stale/malformed official usage. User-confirmed F5 validation for M4's earlier routing UI is pending; routing weights remain uncalibrated until M5.
+
+M4.5 implementation validation on 2026-10-28: `npm run check`, `npm test` (58 tests), `node --check media/main.js` and `git diff --check` passed. Four webview regression tests cover Cmd/Ctrl+Enter, route/pool/score/alternative rendering, stream/cancel/approval/error states, AA token contrast, focus, reduced motion and narrow-layout rules. Manual Extension Development Host validation at narrow/wide widths and 200% zoom remains pending.
 
 ## Session completion checklist
 

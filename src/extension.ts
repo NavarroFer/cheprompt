@@ -538,12 +538,15 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async openInteractiveFallback(webview: vscode.Webview): Promise<void> {
-    if (this.activeRuntime !== "opencode" || this.lastExecutionRuntime !== "opencode") {
-      await webview.postMessage({
-        type: "executionError",
-        runtimeId: "opencode",
-        message: "Usá la terminal interactiva del runtime seleccionado para continuar esta sesión.",
-      });
+    const runtime = this.activeExecution
+      ? this.activeRuntime
+      : this.lastDecision?.selected.runtimeId ?? this.lastExecutionRuntime;
+    if (runtime === "claude-code") {
+      await this.openClaudeInteractive(webview);
+      return;
+    }
+    if (runtime === "codex") {
+      await this.openCodexInteractive(webview);
       return;
     }
     if (!this.lastPrompt || !this.lastDecision) {
@@ -551,7 +554,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    let sessionId = this.lastExecutionSessionId;
+    let sessionId = this.lastExecutionRuntime === "opencode" ? this.lastExecutionSessionId : undefined;
     if (this.activeExecution) {
       const execution = this.activeExecution;
       execution.cancel();
@@ -665,6 +668,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
     const nonce = createNonce();
     const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, "media", "main.js"));
     const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, "media", "styles.css"));
+    const markUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, "media", "hornero.svg"));
     const defaultProfile = vscode.workspace
       .getConfiguration("cheprompt")
       .get<RoutingProfile>("defaultProfile", "balanced");
@@ -674,82 +678,101 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';" />
     <link rel="stylesheet" href="${styleUri}" />
     <title>ChePrompt</title>
   </head>
   <body data-default-profile="${defaultProfile}">
-    <header>
-      <span class="eyebrow">CHEPROMPT</span>
-      <h1>El modelo justo para cada laburo.</h1>
-      <p>Una tarea, una ruta explicada y cupos oficiales cuando estén disponibles.</p>
+    <header class="brand-header">
+      <div>
+        <span class="eyebrow">CHEPROMPT <span aria-hidden="true">·</span> ROUTER</span>
+        <h1>El modelo justo para cada laburo.</h1>
+        <p>Una ruta clara, antes de gastar el cupo.</p>
+      </div>
+      <img class="hornero-mark" src="${markUri}" alt="Hornero de ChePrompt" />
     </header>
 
     <main>
-      <label for="prompt">¿Qué querés hacer?</label>
-      <textarea id="prompt" rows="8" placeholder="Ej.: Investigá por qué falla el login y proponé un arreglo con tests."></textarea>
+      <section class="allowance-strip" aria-label="Cupos por runtime">
+        <article id="usage" class="allowance-card allowance-opencode">
+          <div class="card-heading">
+            <div><span class="eyebrow">POOL 01</span><h2>OpenCode Go</h2></div>
+            <span id="opencode-availability" class="state-chip" data-state="checking">Consultando</span>
+          </div>
+          <p id="usage-status" class="allowance-summary">Consultando cupos oficiales…</p>
+          <ul id="usage-windows" class="allowance-windows"></ul>
+          <button id="refresh-usage" class="compact secondary" type="button" disabled>Actualizar cupo</button>
+        </article>
 
-      <label for="profile">Perfil</label>
-      <select id="profile">
-        <option value="economy">Económico</option>
-        <option value="balanced">Equilibrado</option>
-        <option value="quality">Máxima calidad</option>
-      </select>
+        <article id="claude-runtime" class="allowance-card">
+          <div class="card-heading">
+            <div><span class="eyebrow">POOL 02</span><h2>Claude Pro</h2></div>
+            <span id="claude-availability" class="state-chip" data-state="checking">Consultando</span>
+          </div>
+          <p id="claude-runtime-status" class="allowance-summary" role="status" aria-live="polite">Verificando Claude Code…</p>
+          <p id="claude-usage-status" class="quota-note">Uso exacto: no disponible</p>
+          <div class="runtime-controls">
+            <button id="claude-login" class="compact secondary" type="button" disabled>Iniciar sesión</button>
+            <button id="refresh-claude" class="compact secondary" type="button">Actualizar</button>
+          </div>
+          <div id="claude-actions" class="runtime-actions hidden">
+            <button id="execute-claude" class="compact secondary" type="button" disabled>Elegir Claude</button>
+            <button id="claude-interactive" class="compact secondary" type="button" disabled>Abrir terminal</button>
+          </div>
+        </article>
 
-      <button id="analyze" class="primary">Analizar ruta</button>
-      <p id="status" role="status" aria-live="polite"></p>
+        <article id="codex-runtime" class="allowance-card">
+          <div class="card-heading">
+            <div><span class="eyebrow">POOL 03</span><h2>ChatGPT · Codex</h2></div>
+            <span id="codex-availability" class="state-chip" data-state="checking">Consultando</span>
+          </div>
+          <p id="codex-runtime-status" class="allowance-summary" role="status" aria-live="polite">Verificando Codex…</p>
+          <p id="codex-usage-status" class="quota-note">Uso exacto: no disponible</p>
+          <div class="runtime-controls">
+            <button id="codex-login" class="compact secondary" type="button" disabled>Iniciar sesión</button>
+            <button id="refresh-codex" class="compact secondary" type="button">Actualizar</button>
+          </div>
+          <div id="codex-actions" class="runtime-actions hidden">
+            <button id="execute-codex" class="compact secondary" type="button" disabled>Elegir Codex</button>
+            <button id="codex-interactive" class="compact secondary" type="button" disabled>Abrir terminal</button>
+          </div>
+          <p class="quota-note">La API key usa facturación aparte.</p>
+        </article>
+      </section>
 
-      <section id="inventory" class="inventory" aria-live="polite">
-        <h2>Inventario de runtimes</h2>
-        <p id="inventory-status">Consultando OpenCode…</p>
+      <section class="composer" aria-labelledby="composer-title">
+        <div class="composer-heading">
+          <label id="composer-title" for="prompt">¿Qué querés resolver?</label>
+          <span class="composer-shortcut">⌘/Ctrl + Enter</span>
+        </div>
+        <textarea id="prompt" rows="5" placeholder="Ej.: Investigá por qué falla el login y proponé un arreglo con tests."></textarea>
+        <div class="composer-footer">
+          <label class="profile-label" for="profile">Perfil
+            <select id="profile">
+              <option value="economy">Económico</option>
+              <option value="balanced">Equilibrado</option>
+              <option value="quality">Máxima calidad</option>
+            </select>
+          </label>
+          <button id="analyze" class="primary" type="button">Dale</button>
+        </div>
+      </section>
+
+      <p id="status" class="status-line" role="status" aria-live="polite"></p>
+
+      <details id="inventory" class="inventory">
+        <summary>Inventario de runtimes</summary>
+        <p id="inventory-status">Consultando runtimes…</p>
         <ul id="inventory-models"></ul>
-      </section>
+      </details>
 
-      <section id="usage" class="usage" aria-live="polite">
-        <div class="usage-heading">
-          <h2>Uso de OpenCode Go</h2>
-          <button id="refresh-usage" class="compact" type="button" disabled>Actualizar</button>
-        </div>
-        <p id="usage-status">Consultando límites oficiales…</p>
-        <ul id="usage-windows"></ul>
-      </section>
-
-      <section id="claude-runtime" class="runtime-card" aria-live="polite">
-        <h2>Claude Pro · Claude Code</h2>
-        <p id="claude-runtime-status">Verificando Claude Code…</p>
-        <p id="claude-usage-status">Uso: Not available</p>
-        <div class="runtime-controls">
-          <button id="claude-login" class="compact secondary" type="button" disabled>Iniciar sesión</button>
-          <button id="refresh-claude" class="compact secondary" type="button">Actualizar estado</button>
-        </div>
-        <div id="claude-actions" class="hidden">
-          <button id="execute-claude" class="secondary" type="button" disabled>Elegir Claude Pro</button>
-          <button id="claude-interactive" class="secondary" type="button" disabled>Abrir Claude Code interactivo</button>
-        </div>
-        <p class="hint">El botón principal usa la ruta automática; esta acción es un override con la sesión oficial de Claude Code.</p>
-      </section>
-
-      <section id="codex-runtime" class="runtime-card" aria-live="polite">
-        <h2>ChatGPT · Codex</h2>
-        <p id="codex-runtime-status">Verificando Codex…</p>
-        <p id="codex-usage-status">Uso: Not available</p>
-        <div class="runtime-controls">
-          <button id="codex-login" class="compact secondary" type="button" disabled>Iniciar sesión ChatGPT</button>
-          <button id="refresh-codex" class="compact secondary" type="button">Actualizar estado</button>
-        </div>
-        <div id="codex-actions" class="hidden">
-          <button id="execute-codex" class="secondary" type="button" disabled>Elegir Codex</button>
-          <button id="codex-interactive" class="secondary" type="button" disabled>Abrir Codex interactivo</button>
-        </div>
-        <p class="hint">El botón principal usa la ruta automática. Esta es un override; una API key usa facturación separada.</p>
-      </section>
-
-      <section id="decision" class="decision hidden" aria-live="polite">
+      <section id="decision" class="decision hidden" aria-labelledby="decision-title">
         <div class="decision-heading">
-          <span id="complexity" class="pill"></span>
+          <span class="state-chip" data-state="selected">Elegido</span>
+          <span id="complexity" class="complexity-chip"></span>
           <span id="confidence" class="confidence"></span>
         </div>
-        <h2 id="model"></h2>
+        <h2 id="decision-title"><span id="model"></span></h2>
         <p id="route-runtime" class="mono"></p>
         <p id="model-id" class="mono"></p>
         <p id="reason"></p>
@@ -773,19 +796,24 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
           <button id="apply-override" class="compact secondary" type="button">Aplicar override</button>
         </details>
         <button id="execute" class="run">Ejecutar ruta elegida</button>
-        <button id="interactive-fallback" class="secondary" type="button">Abrir terminal interactiva</button>
-        <p class="hint">Usá la terminal si OpenCode necesita una aprobación interactiva.</p>
       </section>
 
-      <section id="execution" class="execution hidden" aria-live="polite">
-        <h2>Salida del runtime</h2>
+      <section id="execution" class="execution hidden" aria-labelledby="execution-title">
+        <div class="execution-heading">
+          <span class="eyebrow">EN CURSO</span>
+          <span class="state-chip" data-state="running">Ejecución</span>
+        </div>
+        <h2 id="execution-title">Salida del runtime</h2>
         <p id="execution-status" role="status"></p>
-        <div id="execution-output" class="execution-output"></div>
-        <button id="cancel-execution" class="secondary" type="button">Cancelar ejecución</button>
+        <div id="execution-output" class="execution-output" aria-live="off"></div>
+        <div class="execution-controls">
+          <button id="cancel-execution" class="secondary" type="button">Cancelar</button>
+          <button id="interactive-fallback" class="secondary" type="button">Abrir terminal interactiva</button>
+        </div>
       </section>
     </main>
 
-    <footer>Scoring local con hipótesis iniciales; medir antes de recalibrar.</footer>
+    <footer>Scoring local con hipótesis iniciales. Revisá la ruta y el cupo antes de ejecutar.</footer>
     <script nonce="${nonce}" src="${scriptUri}"></script>
   </body>
 </html>`;

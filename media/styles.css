@@ -1,308 +1,593 @@
 :root {
-  color-scheme: light dark;
+  color-scheme: dark;
+  --cp-bg: #070a0f;
+  --cp-surface: #0d131b;
+  --cp-surface-raised: #141d27;
+  --cp-border: #263241;
+  --cp-text: #eaf2f8;
+  --cp-muted: #a9b6c3;
+  --cp-cyan: #39f2ff;
+  --cp-lime: #b8ff3d;
+  --cp-magenta: #ff4fd8;
+  --cp-hornero: #ff7849;
+  --cp-warning: #ffd166;
+  --cp-danger: #ff5d7a;
 }
 
 * {
   box-sizing: border-box;
 }
 
+html {
+  min-width: 0;
+  background: var(--cp-bg);
+}
+
 body {
-  margin: 0;
-  padding: 20px 16px 28px;
-  color: var(--vscode-foreground);
-  background: var(--vscode-sideBar-background);
-  font-family: var(--vscode-font-family);
-}
-
-header {
-  margin-bottom: 24px;
-}
-
-.eyebrow {
-  color: var(--vscode-textLink-foreground);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-}
-
-h1 {
-  margin: 8px 0;
-  font-size: 23px;
-  line-height: 1.1;
-}
-
-h2 {
-  margin: 12px 0 4px;
-}
-
-p {
-  color: var(--vscode-descriptionForeground);
+  max-width: 920px;
+  min-width: 0;
+  margin: 0 auto;
+  padding: 14px 12px 22px;
+  color: var(--cp-text);
+  background: var(--cp-bg);
+  font-family: var(--vscode-font-family, system-ui, sans-serif);
+  font-size: 13px;
   line-height: 1.45;
 }
 
-label {
+button,
+textarea,
+select {
+  font: inherit;
+}
+
+.brand-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.eyebrow {
+  color: var(--cp-muted);
+  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 5px 0 3px;
+  font-size: clamp(19px, 5vw, 25px);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+h2 {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+p {
+  margin: 5px 0;
+  color: var(--cp-muted);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.brand-header p {
+  margin-bottom: 0;
+}
+
+.hornero-mark {
   display: block;
-  margin: 14px 0 6px;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+}
+
+.allowance-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.allowance-card {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--cp-border);
+  border-radius: 6px;
+  background: var(--cp-surface);
+}
+
+.allowance-opencode {
+  border-top-color: var(--cp-cyan);
+}
+
+.card-heading,
+.decision-heading,
+.execution-heading,
+.composer-heading,
+.composer-footer,
+.runtime-controls,
+.runtime-actions,
+.execution-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.card-heading > div {
+  min-width: 0;
+}
+
+.card-heading .eyebrow {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 9px;
+}
+
+.state-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  color: var(--cp-muted);
+  background: var(--cp-surface-raised);
+  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  text-transform: uppercase;
+}
+
+.state-chip::before {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  content: "";
+}
+
+.state-chip[data-state="available"] {
+  color: var(--cp-lime);
+}
+
+.state-chip[data-state="selected"] {
+  color: var(--cp-cyan);
+}
+
+.state-chip[data-state="running"] {
+  color: var(--cp-magenta);
+}
+
+.state-chip[data-state="warning"],
+.state-chip[data-state="checking"] {
+  color: var(--cp-warning);
+}
+
+.state-chip[data-state="unavailable"],
+.state-chip[data-state="expired"],
+.state-chip[data-state="error"] {
+  color: var(--cp-danger);
+}
+
+.allowance-summary {
+  min-height: 2.8em;
+  margin: 8px 0 4px;
+  color: var(--cp-text);
   font-size: 12px;
+}
+
+.quota-note,
+.allowance-windows,
+.inventory p,
+.inventory li {
+  color: var(--cp-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.allowance-windows {
+  margin: 4px 0 8px;
+  padding-left: 16px;
+  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+}
+
+.runtime-controls,
+.runtime-actions {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  margin-top: 8px;
+}
+
+.composer,
+.decision,
+.execution,
+.inventory {
+  min-width: 0;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--cp-border);
+  border-radius: 6px;
+  background: var(--cp-surface);
+}
+
+.composer {
+  border-top-color: var(--cp-hornero);
+}
+
+.composer-heading {
+  align-items: baseline;
+  margin-bottom: 7px;
+}
+
+label {
+  color: var(--cp-text);
   font-weight: 650;
+}
+
+.composer-heading label {
+  font-size: 15px;
+}
+
+.composer-shortcut {
+  color: var(--cp-muted);
+  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 textarea,
 select {
   width: 100%;
-  color: var(--vscode-input-foreground);
-  background: var(--vscode-input-background);
-  border: 1px solid var(--vscode-input-border, transparent);
+  min-width: 0;
+  color: var(--cp-text);
+  background: var(--cp-surface-raised);
+  border: 1px solid var(--cp-border);
   border-radius: 6px;
-  font: inherit;
 }
 
 textarea {
-  min-height: 142px;
+  min-height: 116px;
   padding: 10px;
   resize: vertical;
+  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+  line-height: 1.45;
+}
+
+textarea::placeholder {
+  color: var(--cp-muted);
+  opacity: 1;
 }
 
 select {
-  padding: 8px;
-}
-
-textarea:focus,
-select:focus,
-button:focus-visible {
-  outline: 1px solid var(--vscode-focusBorder);
-  outline-offset: 2px;
+  padding: 7px 8px;
+  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+  font-size: 12px;
 }
 
 button {
-  width: 100%;
-  margin-top: 14px;
-  padding: 9px 12px;
-  border: 0;
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 11px;
+  border: 1px solid var(--cp-border);
   border-radius: 6px;
-  color: var(--vscode-button-foreground);
-  background: var(--vscode-button-background);
+  color: var(--cp-text);
+  background: var(--cp-surface-raised);
   cursor: pointer;
-  font: inherit;
   font-weight: 650;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  transition: background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
 }
 
-button:hover {
-  background: var(--vscode-button-hoverBackground);
+button:hover:not(:disabled) {
+  border-color: var(--cp-cyan);
+  background: #192532;
 }
 
 button:disabled {
-  cursor: wait;
-  opacity: 0.6;
+  cursor: not-allowed;
+  opacity: 0.58;
 }
 
-.decision {
-  margin-top: 18px;
-  padding: 14px;
-  border: 1px solid var(--vscode-panel-border);
-  border-radius: 10px;
-  background: var(--vscode-editor-background);
+button:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--cp-cyan);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgb(57 242 255 / 12%);
 }
 
-.inventory {
-  margin-top: 18px;
-  padding: 12px;
-  border: 1px solid var(--vscode-panel-border);
-  border-radius: 8px;
+.primary {
+  min-width: 86px;
+  min-height: 42px;
+  border-color: var(--cp-hornero);
+  color: var(--cp-bg);
+  background: var(--cp-hornero);
 }
 
-.inventory h2 {
-  margin: 0 0 6px;
-  font-size: 14px;
+.primary:hover:not(:disabled) {
+  border-color: #ff9a73;
+  color: var(--cp-bg);
+  background: #ff9a73;
 }
 
-.inventory p,
-.inventory li {
-  overflow-wrap: anywhere;
-  font-size: 11px;
-}
-
-.inventory ul {
-  margin-bottom: 0;
-}
-
-.usage {
-  margin-top: 18px;
-  padding: 12px;
-  border: 1px solid var(--vscode-panel-border);
-  border-radius: 8px;
-  background: var(--vscode-editor-background);
-}
-
-.runtime-card {
-  margin-top: 18px;
-  padding: 12px;
-  border: 1px solid var(--vscode-panel-border);
-  border-radius: 8px;
-}
-
-.runtime-card h2 {
-  margin: 0 0 6px;
-  font-size: 14px;
-}
-
-.runtime-card p {
-  overflow-wrap: anywhere;
-  font-size: 11px;
-}
-
-.runtime-controls {
-  display: flex;
-  gap: 8px;
-}
-
-.usage-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.usage h2 {
-  margin: 0;
-  font-size: 14px;
-}
-
-.usage p,
-.usage li {
-  overflow-wrap: anywhere;
-  font-size: 11px;
-}
-
-.usage ul {
-  margin-bottom: 0;
+.secondary {
+  color: var(--cp-text);
+  background: var(--cp-surface-raised);
 }
 
 .compact {
-  width: auto;
-  margin: 0;
+  min-height: 32px;
   padding: 5px 8px;
   font-size: 11px;
 }
 
-.decision-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+.composer-footer {
+  align-items: flex-end;
+  margin-top: 8px;
 }
 
-.pill {
-  padding: 3px 7px;
-  border-radius: 999px;
-  color: var(--vscode-badge-foreground);
-  background: var(--vscode-badge-background);
+.profile-label {
+  display: grid;
+  width: min(100%, 220px);
+  gap: 4px;
+  color: var(--cp-muted);
   font-size: 11px;
+}
+
+.status-line {
+  min-height: 1.45em;
+  margin: 9px 2px;
+  color: var(--cp-muted);
+  font-size: 12px;
+}
+
+.status-line[data-state="analyzing"] {
+  color: var(--cp-magenta);
+}
+
+.status-line[data-state="selected"] {
+  color: var(--cp-cyan);
+}
+
+.status-line[data-state="warning"] {
+  color: var(--cp-warning);
+}
+
+.status-line[data-state="error"] {
+  color: var(--cp-danger);
+}
+
+.decision {
+  border-color: var(--cp-cyan);
+  background: var(--cp-surface);
+  box-shadow: inset 2px 0 0 rgb(57 242 255 / 35%);
+}
+
+.decision-heading {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.complexity-chip {
+  padding: 2px 6px;
+  border: 1px solid var(--cp-magenta);
+  border-radius: 999px;
+  color: var(--cp-magenta);
+  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+  font-size: 10px;
   text-transform: uppercase;
 }
 
 .confidence {
-  color: var(--vscode-descriptionForeground);
+  margin-left: auto;
+  color: var(--cp-muted);
   font-size: 11px;
+}
+
+.decision h2 {
+  margin: 10px 0 3px;
+  color: var(--cp-cyan);
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+
+.mono,
+dd,
+.execution-output {
+  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+  overflow-wrap: anywhere;
 }
 
 .mono {
-  margin-top: 0;
-  font-family: var(--vscode-editor-font-family);
+  margin: 3px 0;
+  color: var(--cp-muted);
   font-size: 11px;
 }
 
+#reason {
+  color: var(--cp-text);
+}
+
 dl {
-  margin: 16px 0;
+  margin: 12px 0;
 }
 
 dl div {
   display: grid;
-  grid-template-columns: 96px 1fr;
+  grid-template-columns: minmax(98px, 0.8fr) minmax(0, 1.4fr);
   gap: 8px;
-  padding: 6px 0;
-  border-top: 1px solid var(--vscode-panel-border);
+  padding: 7px 0;
+  border-top: 1px solid var(--cp-border);
 }
 
 dt {
-  color: var(--vscode-descriptionForeground);
+  color: var(--cp-muted);
   font-size: 11px;
 }
 
 dd {
   margin: 0;
-  font-size: 12px;
+  color: var(--cp-text);
+  font-size: 11px;
 }
 
 details {
-  color: var(--vscode-descriptionForeground);
+  margin-top: 8px;
+  color: var(--cp-muted);
   font-size: 12px;
+}
+
+summary {
+  width: fit-content;
+  padding: 3px 0;
+  color: var(--cp-text);
+  cursor: pointer;
+  font-weight: 600;
 }
 
 ul {
   padding-left: 18px;
 }
 
-.run {
-  background: var(--vscode-button-secondaryBackground);
-  color: var(--vscode-button-secondaryForeground);
+li {
+  margin: 4px 0;
+  overflow-wrap: anywhere;
 }
 
-.secondary {
-  color: var(--vscode-button-secondaryForeground);
-  background: var(--vscode-button-secondaryBackground);
+.decision .run {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 14px;
+  border-color: var(--cp-hornero);
+  color: var(--cp-bg);
+  background: var(--cp-hornero);
 }
 
-.hint {
-  margin: 8px 0 0;
-  font-size: 11px;
+.decision .run:hover:not(:disabled) {
+  border-color: #ff9a73;
+  background: #ff9a73;
+}
+
+.inventory {
+  color: var(--cp-muted);
+}
+
+.inventory summary {
+  font-size: 12px;
 }
 
 .execution {
-  margin-top: 18px;
-  padding: 14px;
-  border: 1px solid var(--vscode-panel-border);
-  border-radius: 8px;
-  background: var(--vscode-editor-background);
+  border-color: var(--cp-border);
+}
+
+.execution-heading {
+  margin-bottom: 6px;
 }
 
 .execution h2 {
-  margin: 0 0 6px;
-  font-size: 14px;
+  margin: 0 0 4px;
+}
+
+#execution-status {
+  color: var(--cp-text);
+  font-size: 12px;
 }
 
 .execution-output {
-  max-height: 320px;
+  max-height: min(42vh, 420px);
+  min-height: 0;
   overflow: auto;
-  font-family: var(--vscode-editor-font-family);
-  font-size: 11px;
+  padding: 4px 0;
+  color: var(--cp-text);
+  font-size: 12px;
   white-space: pre-wrap;
 }
 
 .execution-output p {
-  margin: 6px 0;
-  color: var(--vscode-foreground);
-  overflow-wrap: anywhere;
+  margin: 5px 0;
+  color: var(--cp-text);
 }
 
-.execution-output .execution-error,
+.execution-output .execution-step,
+.execution-output .execution-tool {
+  color: var(--cp-muted);
+}
+
+.execution-output .execution-error {
+  color: var(--cp-danger);
+}
+
 .execution-output .execution-approval_required {
-  color: var(--vscode-errorForeground);
+  color: var(--cp-warning);
 }
 
-#status {
-  min-height: 20px;
-  margin: 10px 0 0;
-  font-size: 12px;
+.execution-controls {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  margin-top: 8px;
 }
 
-.hidden {
-  display: none;
+#cancel-execution {
+  border-color: var(--cp-danger);
+  color: var(--cp-danger);
 }
 
 footer {
-  margin-top: 24px;
-  color: var(--vscode-descriptionForeground);
+  margin: 16px 2px 0;
+  color: var(--cp-muted);
   font-size: 10px;
   line-height: 1.4;
+}
+
+.hidden {
+  display: none !important;
+}
+
+@media (max-width: 360px) {
+  body {
+    padding: 10px 8px 16px;
+  }
+
+  .allowance-strip {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .composer-footer {
+    align-items: stretch;
+  }
+
+  .profile-label {
+    width: auto;
+    flex: 1;
+  }
+
+  .confidence {
+    margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
