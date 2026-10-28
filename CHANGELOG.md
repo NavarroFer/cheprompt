@@ -6,3 +6,4 @@
 - Transparent baseline router for three OpenCode Go models.
 - Two-step analyze and execute workflow.
 - Unit tests for routing behavior.
+- Fix the Router contribution so VS Code loads it as a webview.

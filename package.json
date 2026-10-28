@@ -45,6 +45,7 @@
       "cheprompt": [
         {
           "id": "cheprompt.sidebar",
+          "type": "webview",
           "name": "Router"
         }
       ]
