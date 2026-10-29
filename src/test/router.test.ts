@@ -300,3 +300,19 @@ test("uses context and capability metadata when available, without inventing mis
   assert.equal(unknownDecision.selectedScore.capabilityFit, null);
   assert.equal(unknownDecision.selectedScore.contextFit, null);
 });
+
+test("routes prompts with images only to candidates that accept image input", () => {
+  const textOnly = runtimeModel("opencode-go/text-only", "opencode", "opencode-go", "opencode-go", "low");
+  const vision = runtimeModel("opencode-go/vision", "opencode", "opencode-go", "opencode-go", "high", {
+    capabilities: ["text", "tools", "reasoning", "vision"],
+  });
+
+  const decision = routePrompt("Arreglá el botón de la captura", "economy", [textOnly, vision], AS_OF, [], { requiresVision: true });
+  assert.equal(decision.selected.id, "opencode-go/vision");
+  assert.deepEqual(decision.alternatives, []);
+  assert.equal(routePrompt("Renombrá la variable", "economy", [textOnly, vision], AS_OF).selected.id, "opencode-go/text-only");
+  assert.throws(
+    () => routePrompt("Mirá la imagen", "balanced", [textOnly], AS_OF, [], { requiresVision: true }),
+    /acepta imágenes/,
+  );
+});

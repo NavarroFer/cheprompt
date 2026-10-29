@@ -10,9 +10,9 @@ M7 — Parallel agents and worktrees.
 
 Status: User confirms integrated M4/M4.5/M5/M6 Extension Development Host validation, responsive checks and representative synthetic outcomes are complete (2026-10-28). M7 is committed as `866d6ef`; its new UI and real worktree lifecycle still need Extension Development Host validation. An execution-directory bug fix and a composer-first layout change are implemented and tested but not yet committed or F5-validated.
 
-M8 (chat-like execute-on-send plus live file-change list) was requested by the user and is implemented and tested but not yet F5-validated or committed.
+Fixes and M8 were committed as `d3c7f48`. M9 (conversation follow-ups and pasted images) is implemented and tested; F5 validation with real runtimes is pending.
 
-Exact next action: reload the window and confirm: a single OpenCode execution runs in the open folder; the composer is the first panel block; **Dale** starts the chosen route immediately and **Archivos modificados** fills while the agent writes, opening VS Code diffs; **Abrir terminal interactiva** during a run asks for confirmation; disabling `cheprompt.executeOnSend` restores review mode. Then commit the fixes and M8 separately; then press `F5` and test M7 two-task review/execute, dirty/non-Git workspace blocking, output/worktree inspection, cancellation, explicit cleanup and prompt-free history.
+Exact next action: reload the window and confirm: a single OpenCode execution runs in the open folder; the composer is the first panel block; **Dale** starts the chosen route immediately and **Archivos modificados** fills while the agent writes, opening VS Code diffs; a follow-up after a finished run keeps the context in the same session for OpenCode, Claude Code and Codex; a pasted screenshot reaches the model and routes only to image-capable candidates; **Abrir terminal interactiva** during a run asks for confirmation; disabling `cheprompt.executeOnSend` restores review mode. Then continue with the pending M7 validation; then press `F5` and test M7 two-task review/execute, dirty/non-Git workspace blocking, output/worktree inspection, cancellation, explicit cleanup and prompt-free history.
 
 ## Repository state
 
@@ -30,7 +30,7 @@ Exact next action: reload the window and confirm: a single OpenCode execution ru
 - M7 implements exactly two user-authored independent subtasks, separate route review, parallel execution from one pinned commit, one detached worktree per task, cancellation, explicit open/remove controls, and local parent/child history without prompts.
 - M7 worktrees require a clean Git repo and persist in VS Code extension storage until explicitly removed; changes are not merged automatically.
 - Build/typecheck: passing (`npm run check`).
-- Tests: 85 passing, including execute-on-send, workspace change listing/path safety, OpenCode tool targets, streaming-process PWD alignment, interactive handoff reporting, parallel task validation, worktree safety, interruption recovery, route review, outcome aggregation and history privacy.
+- Tests: 94 passing, including conversation follow-ups, image attachment validation/routing/CLI arguments, execute-on-send, workspace change listing/path safety, OpenCode tool targets, streaming-process PWD alignment, interactive handoff reporting, parallel task validation, worktree safety, interruption recovery, route review, outcome aggregation and history privacy.
 - npm audit: no known vulnerabilities after removing the optional publishing dependency.
 - Distribution: local only; Marketplace publishing is out of scope.
 
@@ -56,6 +56,7 @@ Exact next action: reload the window and confirm: a single OpenCode execution ru
 - Codex auth/quota failures temporarily disable the runtime. Codex usage is `Not available` because the official `/usage` command reports token activity, not an exact remaining percentage.
 - The panel offers 20 synthetic evaluation cases and stores local outcome records capped at 100 entries. Records include route, runtime/model, latency, officially reported token usage, reported retries and manual verification, but never the raw prompt or payment data.
 - The CLI is never launched with `--auto`.
+- Finished runs become conversations: follow-ups resume the runtime session and the panel shows one thread; pasted images (up to 4 × 5 MB) are validated, kept only until the prompt is replaced, and routed only to image-capable models.
 - With `cheprompt.executeOnSend` (default on), sending a prompt routes and executes immediately; the panel lists files changed during the run and opens VS Code diffs. Fallbacks and overrides still require review.
 - The project can be installed locally with `npm run install:local`.
 

@@ -98,6 +98,18 @@ export interface RuntimeExecutionEvent {
 
 export type RuntimeExecutionStatus = "succeeded" | "failed" | "cancelled";
 
+export interface RuntimeExecutionOptions {
+  /** Runtime session to continue instead of starting a new conversation. */
+  sessionId?: string;
+  /** Absolute paths of images attached to this turn. */
+  imagePaths?: readonly string[];
+}
+
+export interface RoutingOptions {
+  /** Only consider candidates that accept image input. */
+  requiresVision?: boolean;
+}
+
 export type RuntimeFailureKind = "authentication" | "quota" | "tool" | "process" | "approval" | "protocol" | "verification" | "unknown";
 
 export interface RoutingNotice {

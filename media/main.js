@@ -1,6 +1,11 @@
 const vscode = acquireVsCodeApi();
 
 const promptInput = document.getElementById("prompt");
+const composerTitle = document.getElementById("composer-title");
+const promptAttachments = document.getElementById("prompt-attachments");
+const attachImageButton = document.getElementById("attach-image");
+const attachInput = document.getElementById("attach-input");
+const newConversationButton = document.getElementById("new-conversation");
 const profileInput = document.getElementById("profile");
 const analyzeButton = document.getElementById("analyze");
 const executeButton = document.getElementById("execute");
@@ -69,6 +74,13 @@ let latestDecision;
 let currentEvaluationRecordId;
 const evaluationCasesById = new Map();
 const workspaceChangeItems = new Map();
+const MAX_ATTACHMENTS = 4;
+const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+const SUPPORTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+let pendingAttachments = [];
+let conversation;
+let turnStarting = false;
+let lastSentTurn;
 const parallelTaskElements = new Map();
 let parallelHistoryRecords = [];
 
@@ -81,7 +93,51 @@ promptInput.addEventListener("keydown", (event) => {
   }
 });
 
+promptInput.addEventListener("paste", (event) => {
+  const items = [...(event.clipboardData?.items || [])];
+  const images = items
+    .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+    .map((item) => item.getAsFile())
+    .filter(Boolean);
+  if (!images.length) return;
+  // Keep pasted text when the clipboard carries both text and an image.
+  if (!items.some((item) => item.kind === "string" && item.type === "text/plain")) event.preventDefault();
+  void addImageFiles(images);
+});
+
+attachImageButton.addEventListener("click", () => {
+  attachInput.click();
+});
+
+attachInput.addEventListener("change", () => {
+  void addImageFiles([...(attachInput.files || [])]);
+  attachInput.value = "";
+});
+
+newConversationButton.addEventListener("click", () => {
+  setConversation(undefined);
+  latestDecision = undefined;
+  lastSentTurn = undefined;
+  decisionPanel.classList.add("hidden");
+  claudeActions.classList.add("hidden");
+  codexActions.classList.add("hidden");
+  executionPanel.classList.add("hidden");
+  verificationControls.classList.add("hidden");
+  currentEvaluationRecordId = undefined;
+  executionOutput.replaceChildren();
+  resetWorkspaceChanges();
+  executeButton.disabled = true;
+  status.dataset.state = "selected";
+  status.textContent = "Nueva conversación. Escribí la tarea y ChePrompt elige el modelo.";
+  promptInput.focus();
+  vscode.postMessage({ type: "newConversation" });
+});
+
 analyzeButton.addEventListener("click", () => {
+  if (conversation) {
+    sendFollowUp(promptInput.value);
+    return;
+  }
   analyzeButton.disabled = true;
   status.dataset.state = "analyzing";
   status.textContent = "Enrutando… Analizando tarea y disponibilidad.";
@@ -93,20 +149,166 @@ analyzeButton.addEventListener("click", () => {
   verificationControls.classList.add("hidden");
   currentEvaluationRecordId = undefined;
   executionOutput.replaceChildren();
+  resetWorkspaceChanges();
+  const prompt = promptInput.value;
+  const attachments = takePendingAttachments();
+  const element = appendUserTurn(prompt, attachments);
+  turnStarting = true;
+  lastSentTurn = { prompt, attachments, element };
   vscode.postMessage({
     type: "analyze",
-    prompt: promptInput.value,
+    prompt,
     profile: profileInput.value,
+    attachments: attachmentPayload(attachments),
   });
+  promptInput.value = "";
 });
+
+function sendFollowUp(prompt) {
+  if (!prompt.trim()) {
+    status.dataset.state = "warning";
+    status.textContent = "Escribí un mensaje para continuar la conversación.";
+    return;
+  }
+  const attachments = takePendingAttachments();
+  const element = appendUserTurn(prompt, attachments);
+  turnStarting = true;
+  lastSentTurn = { prompt, attachments, element };
+  status.dataset.state = "selected";
+  status.textContent = `Continuando la conversación con ${conversation.label}…`;
+  prepareExecutionPanel(conversation.runtimeId);
+  vscode.postMessage({ type: "followUp", prompt, attachments: attachmentPayload(attachments) });
+  promptInput.value = "";
+}
+
+function setConversation(next) {
+  conversation = next;
+  composerTitle.textContent = next ? `Seguí la conversación · ${next.label}` : "¿Qué querés resolver?";
+  analyzeButton.textContent = next ? "Enviar" : "Dale";
+  profileInput.disabled = !!next;
+  if (next) newConversationButton.classList.remove("hidden");
+  else newConversationButton.classList.add("hidden");
+}
+
+function appendUserTurn(prompt, attachments) {
+  const turn = document.createElement("div");
+  turn.className = "execution-user";
+  const text = document.createElement("p");
+  text.textContent = prompt.trim();
+  turn.append(text);
+  if (attachments.length) {
+    const images = document.createElement("div");
+    images.className = "execution-user-images";
+    images.append(...attachments.map((attachment) => {
+      const image = document.createElement("img");
+      image.src = attachment.url;
+      image.alt = attachment.name;
+      return image;
+    }));
+    turn.append(images);
+  }
+  executionOutput.append(turn);
+  return turn;
+}
+
+function restoreLastTurn() {
+  if (!lastSentTurn) return;
+  executionOutput.replaceChildren(...[...executionOutput.children].filter((child) => child !== lastSentTurn.element));
+  turnStarting = false;
+  if (!promptInput.value) promptInput.value = lastSentTurn.prompt;
+  if (!pendingAttachments.length) {
+    pendingAttachments = lastSentTurn.attachments;
+    renderPendingAttachments();
+  }
+  lastSentTurn = undefined;
+}
+
+async function addImageFiles(files) {
+  for (const file of files) {
+    if (pendingAttachments.length >= MAX_ATTACHMENTS) {
+      showComposerWarning(`Podés adjuntar hasta ${MAX_ATTACHMENTS} imágenes por mensaje.`);
+      break;
+    }
+    if (!SUPPORTED_IMAGE_TYPES.includes(file.type)) {
+      showComposerWarning("Solo se pueden adjuntar imágenes PNG, JPEG, GIF o WebP.");
+      continue;
+    }
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      showComposerWarning("Cada imagen puede pesar hasta 5 MB.");
+      continue;
+    }
+    try {
+      const url = await readAsDataUrl(file);
+      pendingAttachments.push({ name: file.name || `imagen-${pendingAttachments.length + 1}`, mimeType: file.type, url });
+    } catch {
+      showComposerWarning("No se pudo leer la imagen.");
+    }
+  }
+  renderPendingAttachments();
+}
+
+function readAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function showComposerWarning(message) {
+  status.dataset.state = "warning";
+  status.textContent = message;
+}
+
+function renderPendingAttachments() {
+  promptAttachments.replaceChildren(...pendingAttachments.map((attachment, index) => {
+    const chip = document.createElement("div");
+    chip.className = "attachment-chip";
+    const image = document.createElement("img");
+    image.src = attachment.url;
+    image.alt = attachment.name;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "attachment-remove";
+    remove.textContent = "×";
+    remove.title = `Quitar ${attachment.name}`;
+    remove.ariaLabel = `Quitar ${attachment.name}`;
+    remove.addEventListener("click", () => {
+      pendingAttachments.splice(index, 1);
+      renderPendingAttachments();
+    });
+    chip.append(image, remove);
+    return chip;
+  }));
+  if (pendingAttachments.length) promptAttachments.classList.remove("hidden");
+  else promptAttachments.classList.add("hidden");
+}
+
+function takePendingAttachments() {
+  const attachments = pendingAttachments;
+  pendingAttachments = [];
+  renderPendingAttachments();
+  return attachments;
+}
+
+function attachmentPayload(attachments) {
+  return attachments.map(({ name, mimeType, url }) => ({ name, mimeType, data: url.slice(url.indexOf(",") + 1) }));
+}
+
+function resetWorkspaceChanges() {
+  workspaceChangeItems.clear();
+  executionChangesList.replaceChildren();
+  executionChanges.classList.add("hidden");
+}
 
 executeButton.addEventListener("click", () => {
   prepareExecutionPanel();
   vscode.postMessage({ type: "execute" });
 });
 
-function prepareExecutionPanel() {
-  currentExecutionRuntime = latestDecision?.selected.runtimeId || "opencode";
+function prepareExecutionPanel(runtimeId = latestDecision?.selected.runtimeId) {
+  currentExecutionRuntime = runtimeId || "opencode";
   const runtimeName = currentExecutionRuntime === "claude-code"
     ? "Claude Code"
     : currentExecutionRuntime === "codex" ? "Codex" : "OpenCode";
@@ -117,12 +319,16 @@ function prepareExecutionPanel() {
   codexInteractiveButton.disabled = true;
   executionPanel.classList.remove("hidden");
   analyzeButton.disabled = true;
-  executionOutput.replaceChildren();
+  newConversationButton.disabled = true;
+  if (!turnStarting && executionOutput.children.length > 0) {
+    const retry = document.createElement("p");
+    retry.className = "execution-step";
+    retry.textContent = `REINTENTO · ${runtimeName}`;
+    executionOutput.append(retry);
+  }
+  turnStarting = false;
   executionStatus.textContent = `Iniciando ${runtimeName}…`;
   cancelExecutionButton.disabled = false;
-  workspaceChangeItems.clear();
-  executionChangesList.replaceChildren();
-  executionChanges.classList.add("hidden");
 }
 
 executeClaudeButton.addEventListener("click", () => {
@@ -478,6 +684,9 @@ window.addEventListener("message", ({ data }) => {
 
   if (data.type === "executionResult") {
     const result = data.result;
+    lastSentTurn = undefined;
+    newConversationButton.disabled = false;
+    if (data.conversation) setConversation(data.conversation);
     currentEvaluationRecordId = data.evaluationRecordId;
     if (currentEvaluationRecordId) {
       verificationControls.classList.remove("hidden");
@@ -525,6 +734,8 @@ window.addEventListener("message", ({ data }) => {
   if (data.type === "executionError") {
     executeButton.disabled = isDecisionLocked();
     analyzeButton.disabled = false;
+    newConversationButton.disabled = false;
+    restoreLastTurn();
     cancelExecutionButton.disabled = true;
     executeClaudeButton.disabled = !claudeAvailable;
     claudeInteractiveButton.disabled = !claudeAvailable;
@@ -587,6 +798,7 @@ window.addEventListener("message", ({ data }) => {
     status.dataset.state = "error";
     status.textContent = data.message;
     analyzeButton.disabled = false;
+    restoreLastTurn();
     applyOverrideButton.disabled = !latestDecision || isDecisionLocked();
     executeClaudeButton.disabled = !latestDecision || isDecisionLocked() || !claudeAvailable;
     executeCodexButton.disabled = !latestDecision || isDecisionLocked() || !codexAvailable;
@@ -737,6 +949,7 @@ function renderWorkspaceChange(change) {
 
 function renderExecutionEvent(event) {
   if (event.type === "started") {
+    lastSentTurn = undefined;
     executionStatus.textContent = currentExecutionRuntime === "claude-code"
       ? "Claude Code está trabajando…"
       : currentExecutionRuntime === "codex" ? "Codex está trabajando…" : "OpenCode está trabajando…";

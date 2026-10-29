@@ -173,3 +173,18 @@ test("shows which file, pattern or command each OpenCode tool targets", async ()
   assert.equal(describeToolTarget({ input: {} }, "/repo"), undefined);
   assert.equal(describeToolTarget(undefined, "/repo"), undefined);
 });
+
+test("continues an OpenCode session and attaches images without renaming the session", async () => {
+  const process = new FakeStreamingProcess([], 0);
+  const spawner = new FakeSpawner(process);
+  await new OpenCodeExecutionAdapter("fake-opencode", spawner).start(
+    "Ahora agregá un test",
+    decision,
+    "/repo",
+    () => {},
+    { sessionId: "ses_123", imagePaths: ["/tmp/a.png", "/tmp/b.png"] },
+  ).result;
+
+  assert.deepEqual(spawner.args?.slice(-7), ["--session", "ses_123", "--file", "/tmp/a.png", "--file", "/tmp/b.png", "Ahora agregá un test"]);
+  assert.ok(!spawner.args?.includes("--title"));
+});

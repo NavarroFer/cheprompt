@@ -12,6 +12,7 @@ import {
   RuntimeAdapter,
   RuntimeAvailability,
   RuntimeExecutionEvent,
+  RuntimeExecutionOptions,
   RuntimeFailureKind,
   RuntimeExecutionResult,
   RuntimeInventory,
@@ -48,7 +49,8 @@ const CODEX_MODEL: RuntimeModel = {
   providerId: CODEX_PROVIDER_ID,
   allowancePoolId: CODEX_PROVIDER_ID,
   availability: "available",
-  capabilities: ["text", "tools", "reasoning"],
+  // The official CLI documents image input for this runtime.
+  capabilities: ["text", "tools", "reasoning", "vision"],
   capabilitiesKnown: false,
 };
 
@@ -190,11 +192,12 @@ export class CodexAdapter implements RuntimeAdapter {
     decision: RoutingDecision,
     cwd: string | undefined,
     onEvent: (event: RuntimeExecutionEvent) => void,
+    options: RuntimeExecutionOptions = {},
   ): CodexExecutionHandle {
     const executionId = randomUUID();
     const process = this.processSpawner.start(
       this.executable,
-      buildCodexExecArgs(prompt, decision),
+      buildCodexExecArgs(prompt, decision, options),
       cwd,
       codexSubscriptionEnvironment(),
     );
@@ -352,20 +355,40 @@ export function codexSubscriptionEnvironment(source: NodeJS.ProcessEnv = process
   return environment;
 }
 
-export function buildCodexExecArgs(prompt: string, decision: RoutingDecision): string[] {
-  const args = [
+export function buildCodexExecArgs(
+  prompt: string,
+  decision: RoutingDecision,
+  options: RuntimeExecutionOptions = {},
+): string[] {
+  // `--image` takes several values, so a flag must follow it before the positional arguments.
+  const images = (options.imagePaths ?? []).flatMap((path) => ["--image", path]);
+  const model = decision.selected.id !== CODEX_DEFAULT_MODEL_ID ? ["--model", decision.selected.id] : [];
+  if (options.sessionId) {
+    return [
+      "exec",
+      "--sandbox",
+      "workspace-write",
+      "--ask-for-approval",
+      "on-request",
+      "resume",
+      ...images,
+      "--json",
+      ...model,
+      options.sessionId,
+      prompt,
+    ];
+  }
+  return [
     "exec",
+    ...images,
     "--json",
     "--sandbox",
     "workspace-write",
     "--ask-for-approval",
     "on-request",
+    ...model,
+    prompt,
   ];
-  if (decision.selected.id !== CODEX_DEFAULT_MODEL_ID) {
-    args.push("--model", decision.selected.id);
-  }
-  args.push(prompt);
-  return args;
 }
 
 function consumeItemEvent(

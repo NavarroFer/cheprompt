@@ -5,7 +5,9 @@ import { join } from "node:path";
 import test from "node:test";
 import {
   NodeStreamingProcessSpawner,
+  MODEL_METADATA_ENDPOINT,
   OpenCodeAdapter,
+  parseOpenCodeImageModels,
   parseOpenCodeUsageLimits,
   ProcessExecutor,
   ProcessResult,
@@ -50,10 +52,18 @@ test("discovers OpenCode models and provider inventory without credentials", asy
   const process = new FakeProcessExecutor([
     success("OpenCode 1.2.3"),
     success("opencode-go/gpt-6-luna\nopencode-go/gemini-4-argon\n"),
+    success(JSON.stringify({
+      data: [
+        { providerID: "opencode-go", modelID: "gemini-4-argon", capabilities: { input: ["text", "image"] } },
+        { providerID: "opencode-go", modelID: "gpt-6-luna", capabilities: { input: ["text"] } },
+      ],
+    })),
   ]);
   const inventory = await new OpenCodeAdapter("fake-opencode", process).getInventory();
 
-  assert.deepEqual(process.calls, [["--version"], ["models"]]);
+  assert.deepEqual(process.calls, [["--version"], ["models"], ["api", "GET", MODEL_METADATA_ENDPOINT]]);
+  assert.equal(inventory.models.find((model) => model.id === "opencode-go/gemini-4-argon")?.capabilities.includes("vision"), true);
+  assert.equal(inventory.models.find((model) => model.id === "opencode-go/gpt-6-luna")?.capabilities.includes("vision"), false);
   assert.equal(inventory.runtime.id, "opencode");
   assert.deepEqual(inventory.providers.map((provider) => provider.id), ["opencode-go"]);
   assert.deepEqual(inventory.models.map((model) => model.id), [
@@ -187,4 +197,18 @@ test("starts streaming processes with PWD set to their working directory", async
 
   assert.equal(completion.exitCode, 0);
   assert.deepEqual(JSON.parse(stdout), { pwd: cwd, cwd });
+});
+
+test("reads image input support from OpenCode model metadata and ignores malformed data", () => {
+  const metadata = JSON.stringify({
+    data: [
+      { providerID: "opencode-go", modelID: "deepseek-v4.1-flash", capabilities: { input: ["text", "image"] } },
+      { providerID: "opencode-go", modelID: "hy4-preview", capabilities: { input: ["text"] } },
+      { providerID: "opencode-go", capabilities: { input: ["image"] } },
+    ],
+  });
+
+  assert.deepEqual([...parseOpenCodeImageModels(metadata)], ["opencode-go/deepseek-v4.1-flash"]);
+  assert.deepEqual([...parseOpenCodeImageModels("<html>")], []);
+  assert.deepEqual([...parseOpenCodeImageModels("{}")], []);
 });

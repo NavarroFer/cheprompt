@@ -326,3 +326,30 @@ test("treats malformed JSONL as failed and supports cancellation", async () => {
   assert.equal(cancelled.status, "cancelled");
   assert.equal(cancelled.error, undefined);
 });
+
+test("resumes Codex sessions and places image flags before positional arguments", () => {
+  assert.deepEqual(buildCodexExecArgs("Mirá esto", decision, { imagePaths: ["/tmp/a.png"] }), [
+    "exec",
+    "--image",
+    "/tmp/a.png",
+    "--json",
+    "--sandbox",
+    "workspace-write",
+    "--ask-for-approval",
+    "on-request",
+    "Mirá esto",
+  ]);
+  assert.deepEqual(buildCodexExecArgs("Seguí", decision, { sessionId: "thread-123", imagePaths: ["/tmp/b.png"] }), [
+    "exec",
+    "--sandbox",
+    "workspace-write",
+    "--ask-for-approval",
+    "on-request",
+    "resume",
+    "--image",
+    "/tmp/b.png",
+    "--json",
+    "thread-123",
+    "Seguí",
+  ]);
+});

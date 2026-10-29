@@ -22,6 +22,7 @@ class FakeElement {
   textContent = "";
   className = "";
   value = "";
+  src = "";
   disabled = false;
   checked = false;
 
@@ -47,6 +48,20 @@ class FakeElement {
     this.listeners.get("click")?.({ preventDefault() {} });
   }
 }
+
+class FakeFileReader {
+  result: string | null = null;
+  error: Error | null = null;
+  onload?: () => void;
+  onerror?: () => void;
+
+  readAsDataURL(file: { type: string; content: string }): void {
+    this.result = `data:${file.type};base64,${file.content}`;
+    queueMicrotask(() => this.onload?.());
+  }
+}
+
+const settle = () => new Promise((resolveTick) => setImmediate(resolveTick));
 
 function loadWebview(): {
   elements: Map<string, FakeElement>;
@@ -85,6 +100,9 @@ function loadWebview(): {
     acquireVsCodeApi: () => api,
     document,
     window,
+    FileReader: FakeFileReader,
+    Promise,
+    String,
     setInterval: () => 0,
     Date,
     JSON,
@@ -321,8 +339,86 @@ test("execute-on-send starts the chosen route and lists files changed while it r
   assert.equal(messages.at(-1)?.path, "tests/asistente/audios.test.ts");
 
   elements.get("execute")?.click();
-  assert.equal(list.children.length, 0, "a new execution starts with an empty change list");
+  assert.equal(list.children.length, 2, "a retry keeps the files changed earlier in the conversation");
+  elements.get("new-conversation")?.click();
+  assert.equal(list.children.length, 0, "a new conversation starts with an empty change list");
   assert.equal(elements.get("execution-changes")?.classList.contains("hidden"), true);
+});
+
+test("pasted images travel with the prompt and the conversation continues in the same thread", async () => {
+  const { elements, messages, receive } = loadWebview();
+  const prompt = elements.get("prompt")!;
+  const screenshot = { type: "image/png", size: 12, name: "captura.png", content: "iVBORw0KGgo=" };
+  let prevented = false;
+  prompt.listeners.get("paste")?.({
+    clipboardData: { items: [{ kind: "file", type: "image/png", getAsFile: () => screenshot }] },
+    preventDefault() { prevented = true; },
+  });
+  await settle();
+  assert.equal(prevented, true);
+  const chips = elements.get("prompt-attachments")!;
+  assert.equal(chips.classList.contains("hidden"), false);
+  assert.equal(chips.children.length, 1);
+
+  prompt.value = "El botón de la captura no responde";
+  elements.get("analyze")?.click();
+  const analyze = messages.at(-1)!;
+  assert.equal(analyze.type, "analyze");
+  const [attachment] = analyze.attachments as Array<Record<string, string>>;
+  assert.equal(attachment.mimeType, "image/png");
+  assert.equal(attachment.data, "iVBORw0KGgo=");
+  assert.equal(prompt.value, "", "the composer clears after sending, like a chat");
+  assert.equal(chips.children.length, 0);
+  const thread = elements.get("execution-output")!;
+  assert.equal(thread.children[0].className, "execution-user");
+  assert.equal(thread.children[0].children[0].textContent, "El botón de la captura no responde");
+  assert.equal(thread.children[0].children[1].children[0].src, "data:image/png;base64,iVBORw0KGgo=");
+
+  receive({
+    type: "decision",
+    autoExecute: true,
+    decision: {
+      profile: "balanced",
+      complexity: "standard",
+      selected: codexModel,
+      alternatives: [],
+      selectedScore: score,
+      alternativeScores: [],
+      allowancePoolId: "chatgpt-codex",
+      reason: "Ruta Codex.",
+      confidence: 0.81,
+      pricing: "No disponible",
+    },
+  });
+  receive({ type: "executionEvent", event: { type: "text", text: "Listo, ajusté el handler." } });
+  receive({
+    type: "executionResult",
+    runtimeId: "codex",
+    result: { status: "succeeded", sessionId: "thread-1" },
+    conversation: { runtimeId: "codex", label: "Codex configurado" },
+  });
+  assert.equal(elements.get("analyze")?.textContent, "Enviar");
+  assert.match(elements.get("composer-title")?.textContent ?? "", /Seguí la conversación · Codex configurado/);
+  assert.equal(elements.get("new-conversation")?.classList.contains("hidden"), false);
+  assert.equal(elements.get("profile")?.disabled, true);
+
+  prompt.value = "Ahora agregá un test";
+  elements.get("analyze")?.click();
+  assert.equal(messages.at(-1)?.type, "followUp");
+  assert.equal(messages.at(-1)?.prompt, "Ahora agregá un test");
+  assert.equal(thread.children.length, 3, "the follow-up is appended to the thread without a retry marker");
+  assert.equal(thread.children[2].className, "execution-user");
+  assert.equal(elements.get("cancel-execution")?.disabled, false);
+
+  receive({ type: "executionError", runtimeId: "codex", message: "Ya hay una tarea en ejecución." });
+  assert.equal(prompt.value, "Ahora agregá un test", "a turn that never started is restored for editing");
+  assert.equal(thread.children.length, 2);
+
+  elements.get("new-conversation")?.click();
+  assert.equal(messages.at(-1)?.type, "newConversation");
+  assert.equal(elements.get("analyze")?.textContent, "Dale");
+  assert.equal(elements.get("profile")?.disabled, false);
+  assert.equal(thread.children.length, 0);
 });
 
 test("parallel workflow requires an independence confirmation, reviews both routes, and keeps worktrees explicit", () => {

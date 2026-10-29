@@ -259,6 +259,18 @@ Scope expanded explicitly by the user on 2026-10-28, while M7 Extension Developm
 
 Limitations: the change list reflects files touched in the workspace during the run, including edits made by the user at the same time. Claude Code and Codex tool lines still show only the tool name. Parallel M7 tasks keep their own worktree inspection controls.
 
+### M9 — Conversation follow-ups and pasted images
+
+Scope expanded explicitly by the user on 2026-10-29.
+
+- [x] After a run reports a session, the composer continues that runtime session (OpenCode `run --session`, Claude Code `-p --resume`, Codex `exec resume`) instead of re-routing; each follow-up is a new turn with a fresh attempt budget.
+- [x] Show the conversation as one thread (user turns, runtime output, retry markers) and keep the file-change list for the whole conversation; **Nueva conversación** resets routing.
+- [x] Paste or pick up to four PNG/JPEG/GIF/WebP images (5 MB each); validate type, size and file signature; store them per window in extension storage only until the prompt is replaced; remove stale folders after a day.
+- [x] Pass images through official CLI flags (OpenCode `--file`, Codex `--image`, Claude Code Read access via `--add-dir`) and route image prompts only to candidates that report image input (OpenCode `/api/model` metadata; Claude Code/Codex documented image input).
+- [ ] Validate in Extension Development Host with real runtimes: follow-up context retention per runtime, pasted screenshot understanding, and the vision-only routing error.
+
+Limitations: follow-ups stay on the conversation's runtime; an override or fallback starts a new session without earlier context. Claude Code reads attached images through its Read tool, so images from earlier turns are no longer available once replaced. Parallel M7 tasks do not accept images. OpenCode argument parsing for `--file`/`--session` and Codex resume/image flag ordering were verified without model calls; live model behavior is not yet validated.
+
 ## Explicit non-goals for the current phase
 
 - Publishing to the VS Code Marketplace.

@@ -1,5 +1,8 @@
 import * as vscode from "vscode";
 import { randomUUID } from "node:crypto";
+import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { decodeAttachments, isPromptAttachmentList, PromptAttachment } from "./attachments";
 import {
   mergeChangeKind,
   parseIgnoredPaths,
@@ -50,6 +53,7 @@ import { LOW_CONFIDENCE_THRESHOLD, routePrompt } from "./router";
 import { GitWorktreeManager } from "./worktree";
 import {
   RoutingDecision,
+  RoutingOptions,
   RoutingProfile,
   RuntimeExecutionEvent,
   RuntimeExecutionResult,
@@ -60,6 +64,8 @@ import {
 
 const CHANGE_FLUSH_MS = 300;
 const CHANGE_SETTLE_MS = 1_500;
+const ATTACHMENTS_DIRECTORY = "attachments";
+const STALE_ATTACHMENTS_MS = 24 * 60 * 60 * 1000;
 
 export function activate(context: vscode.ExtensionContext): void {
   const provider = new ChePromptViewProvider(
@@ -93,6 +99,10 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
   private activeExecution?: RuntimeExecutionHandle;
   private handedOffExecutionId?: string;
   private changeRoot?: string;
+  private conversation?: { runtime: "opencode" | "claude-code" | "codex"; sessionId: string; decision: RoutingDecision };
+  private conversationChanges = new Map<string, WorkspaceChangeKind>();
+  private lastImagePaths: string[] = [];
+  private readonly attachmentsDirectory: string;
   private readonly processExecutor = new NodeProcessExecutor();
   private activeRuntime: "opencode" | "claude-code" | "codex" = "opencode";
   private lastExecutionRuntime: "opencode" | "claude-code" | "codex" = "opencode";
@@ -115,6 +125,9 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
     private readonly globalState: vscode.Memento,
     private readonly globalStoragePath: string,
   ) {
+    // Each window keeps pasted images in its own folder and deletes them when the prompt is replaced.
+    this.attachmentsDirectory = join(globalStoragePath, ATTACHMENTS_DIRECTORY, randomUUID());
+    void removeStaleAttachments(join(globalStoragePath, ATTACHMENTS_DIRECTORY));
     this.evaluationHistory = loadEvaluationHistory(
       globalState.get<unknown>(EVALUATION_HISTORY_KEY, []),
     );
@@ -238,6 +251,16 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         return;
       }
 
+      if (message.type === "followUp") {
+        await this.continueConversation(view.webview, message);
+        return;
+      }
+
+      if (message.type === "newConversation") {
+        await this.startNewConversation(view.webview);
+        return;
+      }
+
       if (message.type === "analyze") {
         try {
           if (this.activeExecution || this.parallelHandles.size > 0 || this.parallelLaunching) {
@@ -253,6 +276,9 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
           this.fallbackProposed = false;
           this.taskSucceeded = false;
           this.latestEvaluationRecordId = undefined;
+          this.conversation = undefined;
+          this.conversationChanges = new Map();
+          await this.replaceAttachments(message.attachments ?? []);
           if (!this.inventory) {
             throw new Error("El inventario de modelos todavía no está disponible. Revisá OpenCode e intentá de nuevo.");
           }
@@ -262,6 +288,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
             this.routingCandidates(),
             Date.now(),
             this.usageSnapshots,
+            this.routingOptions(),
           );
           this.lastPrompt = message.prompt.trim();
           this.lastDecision = decision;
@@ -489,6 +516,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         preferred,
         Date.now(),
         this.usageSnapshots,
+        this.routingOptions(),
       );
       const allowance = fallback.remainingPercent === undefined
         ? "El cupo exacto de este pool no está disponible."
@@ -545,6 +573,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         this.routingCandidates(),
         asOf,
         this.usageSnapshots,
+        this.routingOptions(),
       );
 
       if (!previous.manualOverride && previous.routingNotice?.kind !== "fallback") {
@@ -557,6 +586,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
             [previous.selected],
             asOf,
             this.usageSnapshots,
+            this.routingOptions(),
           );
           const alternatives = [automatic.selected, ...automatic.alternatives]
             .filter((model) => !sameCandidate(model, previous.selected))
@@ -673,6 +703,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         [candidate],
         asOf,
         this.usageSnapshots,
+        this.routingOptions(),
       );
       const automatic = routePrompt(
         this.lastPrompt,
@@ -680,6 +711,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         this.routingCandidates(),
         asOf,
         this.usageSnapshots,
+        this.routingOptions(),
       );
       const automaticRanked = [
         { model: automatic.selected, score: automatic.selectedScore },
@@ -1033,7 +1065,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
     return this.parallelHistory.find((record) => record.id === runId)?.tasks.find((task) => task.id === taskId);
   }
 
-  private startExecution(webview: vscode.Webview, runtime: "opencode" | "claude-code" | "codex"): void {
+  private startExecution(webview: vscode.Webview, runtime: "opencode" | "claude-code" | "codex", sessionId?: string): void {
     if (!this.lastPrompt || !this.lastDecision || this.activeExecution || this.parallelHandles.size > 0 || this.parallelLaunching) {
       void webview.postMessage({
         type: "executionError",
@@ -1092,12 +1124,13 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         if (event.sessionId) this.lastExecutionSessionId = event.sessionId;
         void webview.postMessage({ type: "executionEvent", event, runtimeId: runtime });
       };
+      const options = { ...(sessionId ? { sessionId } : {}), imagePaths: this.lastImagePaths };
       const execution = runtime === "opencode"
         ? new OpenCodeExecutionAdapter(
             vscode.workspace.getConfiguration("cheprompt").get<string>("opencodePath", "opencode"),
-          ).start(prompt, decision, cwd, onEvent)
+          ).start(prompt, decision, cwd, onEvent, options)
         : runtime === "claude-code"
-          ? this.claudeAdapter!.start(prompt, cwd, onEvent)
+          ? this.claudeAdapter!.start(prompt, cwd, onEvent, options)
           : this.codexAdapter!.start(
               prompt,
               decision.selected.runtimeId === "codex"
@@ -1105,6 +1138,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
                 : { ...decision, selected: this.codexInventory!.models[0] },
               cwd,
               onEvent,
+              options,
             );
       this.activeExecution = execution;
       this.activeRuntime = runtime;
@@ -1115,7 +1149,10 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
       const stopTracking = () => { setTimeout(() => changeTracker.dispose(), CHANGE_SETTLE_MS); };
       void execution.result.then(stopTracking, stopTracking);
       void execution.result.then(async (result) => {
-        if (result.sessionId) this.lastExecutionSessionId = result.sessionId;
+        if (result.sessionId) {
+          this.lastExecutionSessionId = result.sessionId;
+          this.conversation = { runtime, sessionId: result.sessionId, decision };
+        }
         if (this.activeExecution === execution) this.activeExecution = undefined;
         const evaluationRecord = await this.saveEvaluationRecord(
           decision,
@@ -1132,7 +1169,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
               kind: "task-completed",
               attempt: this.executionsForPrompt,
               maxAttempts: MAX_TASK_EXECUTION_ATTEMPTS,
-              message: "La ejecución terminó correctamente. Analizá una nueva tarea para iniciar otro ciclo.",
+              message: "La ejecución terminó correctamente. Escribí un seguimiento o empezá una nueva conversación.",
             },
           };
         }
@@ -1143,6 +1180,9 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
           evaluationRecordId: evaluationRecord.id,
           canExecuteAgain: !this.taskSucceeded && this.executionsForPrompt < MAX_TASK_EXECUTION_ATTEMPTS,
           handedOff: this.handedOffExecutionId === execution.executionId,
+          ...(this.conversation ? {
+            conversation: { runtimeId: this.conversation.runtime, label: this.conversation.decision.selected.label },
+          } : {}),
         });
         if (this.taskSucceeded && this.lastDecision) {
           await webview.postMessage({ type: "decision", decision: this.lastDecision });
@@ -1339,6 +1379,82 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  private routingOptions(): RoutingOptions {
+    return { requiresVision: this.lastImagePaths.length > 0 };
+  }
+
+  private async replaceAttachments(attachments: readonly PromptAttachment[]): Promise<void> {
+    const decoded = decodeAttachments(attachments);
+    await this.clearAttachments();
+    if (!decoded.length) return;
+    await mkdir(this.attachmentsDirectory, { recursive: true });
+    this.lastImagePaths = await Promise.all(decoded.map(async ({ extension, bytes }) => {
+      const path = join(this.attachmentsDirectory, `${randomUUID()}.${extension}`);
+      await writeFile(path, bytes, { mode: 0o600 });
+      return path;
+    }));
+  }
+
+  private async clearAttachments(): Promise<void> {
+    const paths = this.lastImagePaths;
+    this.lastImagePaths = [];
+    await Promise.all(paths.map((path) => rm(path, { force: true })));
+  }
+
+  private async continueConversation(webview: vscode.Webview, message: FollowUpMessage): Promise<void> {
+    const conversation = this.conversation;
+    const fail = (text: string) => webview.postMessage({ type: "executionError", message: text });
+    if (!conversation) {
+      await fail("No hay una conversación para continuar. Empezá una nueva.");
+      return;
+    }
+    if (this.activeExecution || this.parallelHandles.size > 0 || this.parallelLaunching) {
+      await fail("Ya hay una tarea en ejecución. Esperá a que termine o cancelala.");
+      return;
+    }
+    if (!message.prompt.trim()) {
+      await fail("Escribí un mensaje para continuar la conversación.");
+      return;
+    }
+    try {
+      await this.replaceAttachments(message.attachments ?? []);
+    } catch (error) {
+      await fail(error instanceof Error ? error.message : "No se pudieron adjuntar las imágenes.");
+      return;
+    }
+    if (this.lastImagePaths.length && !conversation.decision.selected.capabilities.includes("vision")) {
+      await this.clearAttachments();
+      await fail(`${conversation.decision.selected.label} no informa que acepte imágenes. Empezá una nueva conversación para elegir un modelo que las soporte.`);
+      return;
+    }
+
+    // A follow-up is a new turn in the same runtime session, not a retry of the previous one.
+    const { routingNotice: _previousNotice, ...decision } = conversation.decision;
+    this.lastPrompt = message.prompt.trim();
+    this.lastDecision = decision;
+    this.executionsForPrompt = 0;
+    this.fallbackProposed = false;
+    this.taskSucceeded = false;
+    this.latestEvaluationRecordId = undefined;
+    this.startExecution(webview, conversation.runtime, conversation.sessionId);
+  }
+
+  private async startNewConversation(webview: vscode.Webview): Promise<void> {
+    if (this.activeExecution || this.parallelHandles.size > 0 || this.parallelLaunching) {
+      await webview.postMessage({
+        type: "executionError",
+        message: "Cancelá la ejecución actual antes de empezar otra conversación.",
+      });
+      return;
+    }
+    this.conversation = undefined;
+    this.conversationChanges = new Map();
+    this.lastPrompt = undefined;
+    this.lastDecision = undefined;
+    this.lastExecutionSessionId = undefined;
+    await this.clearAttachments();
+  }
+
   private startSelectedRoute(webview: vscode.Webview): void {
     const selectedRuntime = this.lastDecision?.selected.runtimeId;
     if (!selectedRuntime || !isRuntimeId(selectedRuntime)) {
@@ -1350,7 +1466,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
 
   private trackWorkspaceChanges(webview: vscode.Webview, root: string, executionId: string): vscode.Disposable {
     const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, "**/*"));
-    const reported = new Map<string, WorkspaceChangeKind>();
+    const reported = this.conversationChanges;
     const pending = new Map<string, WorkspaceChangeKind>();
     let timer: NodeJS.Timeout | undefined;
 
@@ -1481,7 +1597,8 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
           <label id="composer-title" for="prompt">¿Qué querés resolver?</label>
           <span class="composer-shortcut">⌘/Ctrl + Enter</span>
         </div>
-        <textarea id="prompt" rows="5" placeholder="Ej.: Investigá por qué falla el login y proponé un arreglo con tests."></textarea>
+        <textarea id="prompt" rows="5" placeholder="Ej.: Investigá por qué falla el login y proponé un arreglo con tests. Pegá capturas con ⌘/Ctrl + V."></textarea>
+        <div id="prompt-attachments" class="prompt-attachments hidden" aria-label="Imágenes adjuntas"></div>
         <div class="composer-footer">
           <label class="profile-label" for="profile">Perfil
             <select id="profile">
@@ -1490,9 +1607,16 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
               <option value="quality">Máxima calidad</option>
             </select>
           </label>
-          <button id="analyze" class="primary" type="button">Dale</button>
+          <div class="composer-actions">
+            <button id="attach-image" class="compact secondary" type="button">Adjuntar imagen</button>
+            <button id="new-conversation" class="compact secondary hidden" type="button">Nueva conversación</button>
+            <button id="analyze" class="primary" type="button">Dale</button>
+          </div>
+          <input id="attach-input" class="hidden" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple />
         </div>
       </section>
+
+      <p id="status" class="status-line" role="status" aria-live="polite"></p>
 
       <section class="allowance-strip" aria-label="Cupos por runtime">
         <article id="usage" class="allowance-card allowance-opencode">
@@ -1561,8 +1685,6 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         <p id="parallel-status" class="status-line" role="status" aria-live="polite"></p>
         <div id="parallel-results" class="parallel-results"></div>
       </details>
-
-      <p id="status" class="status-line" role="status" aria-live="polite"></p>
 
       <details id="inventory" class="inventory">
         <summary>Inventario de runtimes</summary>
@@ -1664,7 +1786,10 @@ type AnalyzeMessage = {
   type: "analyze";
   prompt: string;
   profile: RoutingProfile;
+  attachments?: PromptAttachment[];
 };
+type FollowUpMessage = { type: "followUp"; prompt: string; attachments?: PromptAttachment[] };
+type NewConversationMessage = { type: "newConversation" };
 
 type ExecuteMessage = { type: "execute" };
 type AnalyzeParallelMessage = {
@@ -1720,6 +1845,8 @@ function isWebviewMessage(value: unknown): value is
   | CancelExecutionMessage
   | InteractiveFallbackMessage
   | OpenChangeMessage
+  | FollowUpMessage
+  | NewConversationMessage
   | SelectClaudeMessage
   | ClaudeInteractiveMessage
   | RefreshClaudeMessage
@@ -1768,6 +1895,11 @@ function isWebviewMessage(value: unknown): value is
   ) return true;
   if (candidate.type === "openChange" && typeof candidate.path === "string") return true;
   if (
+    candidate.type === "followUp" &&
+    typeof candidate.prompt === "string" &&
+    (candidate.attachments === undefined || isPromptAttachmentList(candidate.attachments))
+  ) return true;
+  if (
     ["openParallelWorktree", "removeParallelWorktree"].includes(String(candidate.type)) &&
     typeof candidate.runId === "string" &&
     typeof candidate.taskId === "string"
@@ -1775,6 +1907,7 @@ function isWebviewMessage(value: unknown): value is
   if ([
     "webviewReady",
     "execute",
+    "newConversation",
     "cancelParallel",
     "openParallelWorktree",
     "removeParallelWorktree",
@@ -1796,8 +1929,22 @@ function isWebviewMessage(value: unknown): value is
   return (
     candidate.type === "analyze" &&
     typeof candidate.prompt === "string" &&
-    ["economy", "balanced", "quality"].includes(String(candidate.profile))
+    ["economy", "balanced", "quality"].includes(String(candidate.profile)) &&
+    (candidate.attachments === undefined || isPromptAttachmentList(candidate.attachments))
   );
+}
+
+async function removeStaleAttachments(root: string): Promise<void> {
+  // Folders of windows that closed without replacing their last prompt are removed after a day.
+  try {
+    const now = Date.now();
+    await Promise.all((await readdir(root)).map(async (entry) => {
+      const path = join(root, entry);
+      if (now - (await stat(path)).mtimeMs > STALE_ATTACHMENTS_MS) await rm(path, { recursive: true, force: true });
+    }));
+  } catch {
+    // Nothing has been attached yet.
+  }
 }
 
 function isRuntimeId(value: string): value is "opencode" | "claude-code" | "codex" {

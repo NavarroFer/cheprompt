@@ -2,6 +2,7 @@ import {
   Complexity,
   RoutingScoreBreakdown,
   RoutingDecision,
+  RoutingOptions,
   RoutingProfile,
   RuntimeModel,
   UsageSnapshot,
@@ -92,6 +93,7 @@ export function routePrompt(
   candidates: readonly RuntimeModel[] = [],
   asOf?: number,
   usageSnapshots: readonly UsageSnapshot[] = [],
+  options: RoutingOptions = {},
 ): RoutingDecision {
   const prompt = rawPrompt.trim();
   if (!prompt) {
@@ -111,12 +113,19 @@ export function routePrompt(
 
   const complexity: Complexity = score >= 4 ? "complex" : score <= 0 ? "simple" : "standard";
   const evaluationTime = asOf ?? 0;
-  const eligible = candidates.filter((candidate) => isEligible(candidate, asOf, usageSnapshots));
-  if (!eligible.length) {
+  const available = candidates.filter((candidate) => isEligible(candidate, asOf, usageSnapshots));
+  if (!available.length) {
     throw new Error("No hay modelos disponibles y vigentes para analizar esta tarea.");
+  }
+  const eligible = options.requiresVision
+    ? available.filter((candidate) => candidate.capabilities.includes("vision"))
+    : available;
+  if (!eligible.length) {
+    throw new Error("Ningún modelo disponible informa que acepta imágenes. Quitá la imagen o habilitá un runtime que las soporte.");
   }
 
   const analysis = analyzeTask(prompt, normalized, complexity, [...complexMatches, ...simpleMatches]);
+  if (options.requiresVision) analysis.needsVision = true;
   const scored = eligible
     .map((model) => ({
       model,

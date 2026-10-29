@@ -10,6 +10,7 @@ import {
   RuntimeModel,
   RuntimeDescriptor,
   RuntimeExecutionEvent,
+  RuntimeExecutionOptions,
   RuntimeExecutionResult,
   RuntimeFailureKind,
   UsageSnapshot,
@@ -20,6 +21,7 @@ import {
 export { USAGE_SNAPSHOT_MAX_AGE_MS } from "./types";
 
 export const USAGE_LIMITS_ENDPOINT = "/api/experimental/usage/limits";
+export const MODEL_METADATA_ENDPOINT = "/api/model";
 const USAGE_SOURCE = `OpenCode API ${USAGE_LIMITS_ENDPOINT}`;
 const USAGE_WINDOWS: readonly UsageWindow[] = ["rolling", "weekly", "monthly"];
 
@@ -123,6 +125,7 @@ export class OpenCodeExecutionAdapter {
     decision: RoutingDecision,
     cwd: string | undefined,
     onEvent: (event: RuntimeExecutionEvent) => void,
+    options: RuntimeExecutionOptions = {},
   ): OpenCodeExecutionHandle {
     const executionId = randomUUID();
     const title = `ChePrompt: ${prompt.replace(/\s+/g, " ").slice(0, 48)}`;
@@ -132,8 +135,8 @@ export class OpenCodeExecutionAdapter {
       "json",
       "--model",
       decision.selected.id,
-      "--title",
-      title,
+      ...(options.sessionId ? ["--session", options.sessionId] : ["--title", title]),
+      ...(options.imagePaths ?? []).flatMap((path) => ["--file", path]),
       prompt,
     ], cwd);
     let sessionId: string | undefined;
@@ -333,7 +336,12 @@ export class OpenCodeAdapter implements RuntimeAdapter {
         throw new Error("OpenCode devolvió una lista de modelos con formato no reconocido.");
       }
 
-      const models = ids.map(toRuntimeModel);
+      const imageModels = await this.getImageInputModels();
+      const models = ids.map(toRuntimeModel).map((model) => (
+        imageModels.has(model.id) && !model.capabilities.includes("vision")
+          ? { ...model, capabilities: [...model.capabilities, "vision" as const] }
+          : model
+      ));
       const providers = uniqueProviders(models);
       return {
         runtime: OPENCODE_RUNTIME,
@@ -346,6 +354,16 @@ export class OpenCodeAdapter implements RuntimeAdapter {
         throw new Error("No se encontró OpenCode. Instalá el CLI o configurá cheprompt.opencodePath.");
       }
       throw error;
+    }
+  }
+
+  private async getImageInputModels(): Promise<Set<string>> {
+    try {
+      // OpenCode's own model metadata reports which inputs each model accepts.
+      const result = await this.processExecutor.run(this.executable, ["api", "GET", MODEL_METADATA_ENDPOINT]);
+      return result.exitCode === 0 ? parseOpenCodeImageModels(result.stdout) : new Set();
+    } catch {
+      return new Set();
     }
   }
 
@@ -427,6 +445,23 @@ export function parseOpenCodeUsageLimits(
   }
 
   return { ...base, status: "available", windows, freshness };
+}
+
+export function parseOpenCodeImageModels(output: string): Set<string> {
+  const ids = new Set<string>();
+  let response: unknown;
+  try {
+    response = JSON.parse(output);
+  } catch {
+    return ids;
+  }
+  const models = isRecord(response) && Array.isArray(response.data) ? response.data : [];
+  for (const model of models) {
+    if (!isRecord(model) || typeof model.providerID !== "string" || typeof model.modelID !== "string") continue;
+    const input = isRecord(model.capabilities) ? model.capabilities.input : undefined;
+    if (Array.isArray(input) && input.includes("image")) ids.add(`${model.providerID}/${model.modelID}`);
+  }
+  return ids;
 }
 
 export function usageFreshness(observedAt: number, now: number): "fresh" | "stale" | "unknown" {

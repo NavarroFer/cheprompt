@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { dirname } from "node:path";
 import {
   NodeProcessExecutor,
   NodeStreamingProcessSpawner,
@@ -13,6 +14,7 @@ import {
   RuntimeAvailability,
   RuntimeDescriptor,
   RuntimeExecutionEvent,
+  RuntimeExecutionOptions,
   RuntimeFailureKind,
   RuntimeExecutionResult,
   RuntimeInventory,
@@ -41,7 +43,8 @@ const CLAUDE_DEFAULT_MODEL: RuntimeModel = {
   providerId: PROVIDER_ID,
   allowancePoolId: PROVIDER_ID,
   availability: "available",
-  capabilities: ["text", "tools", "reasoning"],
+  // The official CLI documents image input for this runtime.
+  capabilities: ["text", "tools", "reasoning", "vision"],
   capabilitiesKnown: false,
 };
 
@@ -135,19 +138,15 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     };
   }
 
-  start(prompt: string, cwd: string | undefined, onEvent: (event: RuntimeExecutionEvent) => void): RuntimeExecutionHandle {
+  start(
+    prompt: string,
+    cwd: string | undefined,
+    onEvent: (event: RuntimeExecutionEvent) => void,
+    options: RuntimeExecutionOptions = {},
+  ): RuntimeExecutionHandle {
     const executionId = randomUUID();
     const environment = claudeSubscriptionEnvironment();
-    const process = this.processSpawner.start(this.executable, [
-      "-p",
-      "--output-format",
-      "stream-json",
-      "--verbose",
-      "--include-partial-messages",
-      "--permission-mode",
-      "default",
-      prompt,
-    ], cwd, environment);
+    const process = this.processSpawner.start(this.executable, buildClaudePrintArgs(prompt, options), cwd, environment);
 
     let sessionId: string | undefined;
     let malformedOutput = false;
@@ -369,6 +368,27 @@ export function buildClaudeInteractiveArgs(prompt: string, sessionId?: string): 
   return sessionId
     ? ["--resume", sessionId, "--permission-mode", "default"]
     : ["--permission-mode", "default", prompt];
+}
+
+export function buildClaudePrintArgs(prompt: string, options: RuntimeExecutionOptions = {}): string[] {
+  const images = options.imagePaths ?? [];
+  // Print mode reads attached images with its Read tool, so their directory must be an allowed working directory.
+  const imageDirectories = [...new Set(images.map((path) => dirname(path)))];
+  const promptWithImages = images.length
+    ? `${prompt}\n\nImágenes adjuntas (abrilas con la herramienta Read):\n${images.map((path) => `- ${path}`).join("\n")}`
+    : prompt;
+  return [
+    "-p",
+    ...(options.sessionId ? ["--resume", options.sessionId] : []),
+    ...(imageDirectories.length ? ["--add-dir", ...imageDirectories] : []),
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    promptWithImages,
+  ];
 }
 
 export function launchClaudeCodeInteractive(prompt: string, sessionId?: string): void {

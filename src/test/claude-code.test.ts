@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildClaudeInteractiveArgs,
+  buildClaudePrintArgs,
   ClaudeCodeAdapter,
   claudeSubscriptionEnvironment,
   isClaudeSubscriptionAuth,
@@ -254,4 +255,18 @@ test("redacts credentials from Claude CLI errors before showing them", () => {
   const message = safeClaudeError("Failed with sk-ant-api03-secret-value and Bearer oauth-secret");
   assert.equal(message.includes("sk-ant-api03-secret-value"), false);
   assert.equal(message.includes("oauth-secret"), false);
+});
+
+test("resumes Claude Code sessions and grants read access only to the attached images folder", () => {
+  const args = buildClaudePrintArgs("Arreglá el botón", {
+    sessionId: "session-1",
+    imagePaths: ["/storage/attachments/w1/a.png", "/storage/attachments/w1/b.png"],
+  });
+
+  assert.deepEqual(args.slice(0, 5), ["-p", "--resume", "session-1", "--add-dir", "/storage/attachments/w1"]);
+  assert.equal(args[5], "--output-format");
+  assert.match(args.at(-1) ?? "", /^Arreglá el botón\n\nImágenes adjuntas[^\n]*\n- \/storage\/attachments\/w1\/a.png\n- \/storage\/attachments\/w1\/b.png$/);
+  assert.ok(!args.includes("--dangerously-skip-permissions"));
+  assert.deepEqual(buildClaudePrintArgs("Hola").slice(0, 2), ["-p", "--output-format"]);
+  assert.equal(buildClaudePrintArgs("Hola").at(-1), "Hola");
 });
