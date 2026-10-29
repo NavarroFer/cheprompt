@@ -247,6 +247,18 @@ Limitations: the budget limits ChePrompt execution attempts, not provider billin
 Scope decision: M7 starts with explicit user-authored subtasks. ChePrompt will not invent a decomposition or merge agent changes automatically.
 Implementation note: the first slice is deliberately capped at two subtasks. Parallel history is local and retains route/result metadata but never the subtask prompts. Worktrees persist until the user explicitly removes them.
 
+### M8 — Chat-like single-step execution
+
+Scope expanded explicitly by the user on 2026-10-28, while M7 Extension Development Host validation is still pending.
+
+- [x] Execute the automatically chosen route as soon as the prompt is sent (`cheprompt.executeOnSend`, default on); keep the decision card visible during the run and allow restoring review mode.
+- [x] Keep fallback proposals and manual overrides behind explicit review.
+- [x] List workspace files created, modified or deleted during a single execution (Git-ignored, `.git` and `node_modules` paths hidden) and open each one in VS Code's diff view.
+- [x] Show the file, pattern or command targeted by each OpenCode tool event.
+- [ ] Validate in Extension Development Host: send → immediate run, live change list and diff opening, review mode with the setting disabled.
+
+Limitations: the change list reflects files touched in the workspace during the run, including edits made by the user at the same time. Claude Code and Codex tool lines still show only the tool name. Parallel M7 tasks keep their own worktree inspection controls.
+
 ## Explicit non-goals for the current phase
 
 - Publishing to the VS Code Marketplace.

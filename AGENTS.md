@@ -10,7 +10,7 @@ ChePrompt routes one coding task to the most suitable eligible runtime and model
 - Keep VS Code APIs out of the router so it remains easy to test.
 - Keep OpenCode process integration behind `src/opencode.ts`.
 - Never store credentials or payment data.
-- Do not execute a routed task before the user reviews the decision.
+- Execute a routed task on send only while `cheprompt.executeOnSend` is enabled (user-requested default since 2026-10-28); when it is disabled, require review first. Fallback routes and manual overrides always require review.
 - Do not enable OpenCode `--auto` by default.
 - Treat the initial model matrix as a hypothesis and change it only with evaluation evidence.
 

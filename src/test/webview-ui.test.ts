@@ -235,6 +235,96 @@ test("execution status, streaming text and cancellation use accessible runtime c
   assert.equal(elements.get("execution-status")?.textContent, "Codex informó un límite de uso.");
 });
 
+test("interactive handoff is confirmed and reported separately from a cancellation", () => {
+  const { elements, messages, receive } = loadWebview();
+  receive({
+    type: "codexRuntime",
+    inventory: { runtime: { availability: "available", installed: true }, providers: [], models: [] },
+  });
+  receive({
+    type: "decision",
+    decision: {
+      profile: "balanced",
+      complexity: "standard",
+      selected: codexModel,
+      alternatives: [],
+      selectedScore: score,
+      alternativeScores: [],
+      allowancePoolId: "chatgpt-codex",
+      reason: "Ruta Codex.",
+      confidence: 0.81,
+      pricing: "No disponible",
+    },
+  });
+  elements.get("execute")?.click();
+  receive({ type: "executionEvent", event: { type: "started" } });
+
+  elements.get("interactive-fallback")?.click();
+  assert.equal(messages.at(-1)?.type, "interactiveFallback");
+  assert.equal(elements.get("interactive-fallback")?.disabled, true);
+  receive({ type: "interactiveFallbackDeclined" });
+  assert.equal(elements.get("interactive-fallback")?.disabled, false);
+  assert.equal(elements.get("execution-status")?.textContent, "La ejecución sigue en curso.");
+
+  receive({ type: "executionResult", runtimeId: "codex", handedOff: true, result: { status: "cancelled" } });
+  assert.match(elements.get("execution-status")?.textContent ?? "", /terminal interactiva/);
+  receive({ type: "executionResult", runtimeId: "codex", result: { status: "cancelled" } });
+  assert.equal(elements.get("execution-status")?.textContent, "Ejecución cancelada.");
+});
+
+test("execute-on-send starts the chosen route and lists files changed while it runs", () => {
+  const { elements, messages, receive } = loadWebview();
+  receive({
+    type: "codexRuntime",
+    inventory: { runtime: { availability: "available", installed: true }, providers: [], models: [] },
+  });
+  elements.get("prompt")!.value = "Respondé aunque haya audios";
+  elements.get("analyze")?.click();
+  assert.equal(messages.at(-1)?.type, "analyze");
+
+  receive({
+    type: "decision",
+    autoExecute: true,
+    decision: {
+      profile: "balanced",
+      complexity: "standard",
+      selected: codexModel,
+      alternatives: [],
+      selectedScore: score,
+      alternativeScores: [],
+      allowancePoolId: "chatgpt-codex",
+      reason: "Ruta Codex.",
+      confidence: 0.81,
+      pricing: "No disponible",
+    },
+  });
+  assert.equal(messages.at(-1)?.type, "analyze", "the extension starts the run; the webview must not request a second execution");
+  assert.equal(elements.get("execution")?.classList.contains("hidden"), false);
+  assert.equal(elements.get("execute")?.disabled, true);
+  assert.equal(elements.get("cancel-execution")?.disabled, false);
+  assert.match(elements.get("status")?.textContent ?? "", /Codex configurado elegido automáticamente/);
+
+  receive({ type: "workspaceChanges", changes: [{ path: "src/lib/asistente/nucleo.ts", kind: "changed" }] });
+  receive({ type: "workspaceChanges", changes: [
+    { path: "src/lib/asistente/nucleo.ts", kind: "changed" },
+    { path: "tests/asistente/audios.test.ts", kind: "created" },
+  ] });
+  const list = elements.get("execution-changes-list")!;
+  assert.equal(elements.get("execution-changes")?.classList.contains("hidden"), false);
+  assert.equal(list.children.length, 2);
+  assert.equal(elements.get("execution-changes-title")?.textContent, "Archivos modificados · 2");
+  const createdButton = list.children[1].children[0];
+  assert.equal(createdButton.children[0].textContent, "NUEVO");
+  assert.equal(createdButton.children[1].textContent, "tests/asistente/audios.test.ts");
+  createdButton.click();
+  assert.equal(messages.at(-1)?.type, "openChange");
+  assert.equal(messages.at(-1)?.path, "tests/asistente/audios.test.ts");
+
+  elements.get("execute")?.click();
+  assert.equal(list.children.length, 0, "a new execution starts with an empty change list");
+  assert.equal(elements.get("execution-changes")?.classList.contains("hidden"), true);
+});
+
 test("parallel workflow requires an independence confirmation, reviews both routes, and keeps worktrees explicit", () => {
   const { elements, messages, receive } = loadWebview();
   elements.get("parallel-task-1")!.value = "Implementá la paginación del endpoint y agregá pruebas.";

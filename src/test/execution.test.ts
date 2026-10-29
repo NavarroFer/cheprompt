@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildInteractiveOpenCodeArgs,
+  describeToolTarget,
   OpenCodeExecutionAdapter,
   ProcessCompletion,
   StreamingProcess,
@@ -112,11 +113,12 @@ test("treats malformed JSONL as a failed execution and emits a clear error", asy
 
 test("cancels the child process and reports a cancelled result", async () => {
   const process = new FakeStreamingProcess([], undefined);
+  const events: RuntimeExecutionEvent[] = [];
   const execution = new OpenCodeExecutionAdapter("fake-opencode", new FakeSpawner(process)).start(
     "Hacé una tarea",
     decision,
     undefined,
-    () => {},
+    (event) => events.push(event),
   );
 
   execution.cancel();
@@ -125,6 +127,8 @@ test("cancels the child process and reports a cancelled result", async () => {
   assert.equal(process.cancelCalls, 1);
   assert.equal(result.status, "cancelled");
   assert.equal(result.exitCode, 130);
+  assert.equal(result.error, undefined);
+  assert.equal(events.at(-1)?.message, "Ejecución cancelada.");
 });
 
 test("recognizes approval output and provides interactive terminal arguments", async () => {
@@ -149,4 +153,23 @@ test("recognizes approval output and provides interactive terminal arguments", a
     "--prompt",
     "Hacé una tarea",
   ]);
+});
+
+test("shows which file, pattern or command each OpenCode tool targets", async () => {
+  const toolEvent = JSON.stringify({
+    type: "tool_use",
+    sessionID: "ses_tools",
+    part: { tool: "edit", state: { status: "completed", input: { filePath: "/repo/src/lib/asistente/nucleo.ts" } } },
+  });
+  const process = new FakeStreamingProcess([`${toolEvent}\n`], 0);
+  const events: RuntimeExecutionEvent[] = [];
+  await new OpenCodeExecutionAdapter("fake-opencode", new FakeSpawner(process))
+    .start("Hacé una tarea", decision, "/repo", (event) => events.push(event)).result;
+
+  assert.equal(events.find((event) => event.type === "tool")?.message, "edit · src/lib/asistente/nucleo.ts");
+  assert.equal(describeToolTarget({ input: { command: "npm   test\n -- --watch" } }, "/repo"), "npm test -- --watch");
+  assert.equal(describeToolTarget({ input: { pattern: "audio" } }, undefined), "audio");
+  assert.equal(describeToolTarget({ input: { command: "x".repeat(120) } }, undefined)?.length, 80);
+  assert.equal(describeToolTarget({ input: {} }, "/repo"), undefined);
+  assert.equal(describeToolTarget(undefined, "/repo"), undefined);
 });

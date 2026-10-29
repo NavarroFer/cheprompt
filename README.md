@@ -75,14 +75,14 @@ El instalador nunca reemplaza una carpeta o enlace existente: si encuentra un co
 ## Flujo del MVP
 
 ```text
-prompt → clasificación local → decisión explicada → confirmación → streaming / terminal interactiva
+prompt → clasificación local → decisión explicada → ejecución inmediata → streaming + archivos modificados
 ```
 
 1. Escribí la tarea.
 2. Elegí el perfil económico, equilibrado o calidad.
-3. Presioná **Dale** o usá `Cmd/Ctrl + Enter`.
-4. Revisá runtime/modelo, puntaje, cupo, motivo y alternativas.
-5. Presioná **Ejecutar ruta elegida**; si preferís, elegí un override y revisá la nueva ruta antes de ejecutar. Para aprobaciones, abrí la terminal interactiva del runtime.
+3. Presioná **Dale** o usá `Cmd/Ctrl + Enter`: ChePrompt elige la suscripción/modelo y ejecuta enseguida, como un chat.
+4. Mientras corre, la tarjeta de decisión muestra runtime/modelo, puntaje, cupo, motivo y alternativas, y **Archivos modificados** lista lo que el agente va escribiendo; cada archivo abre el diff de VS Code.
+5. Para revisar antes de ejecutar, desactivá `cheprompt.executeOnSend` y usá **Ejecutar ruta elegida**. Los fallbacks y overrides siempre requieren revisión. Para aprobaciones, pasá la ejecución a la terminal interactiva del runtime (pide confirmación si hay una ejecución en curso).
 
 El router puntúa de forma local y determinística los candidatos descubiertos de los tres runtimes. Los puntajes son hipótesis iniciales, no una garantía de calidad. Las ventanas oficiales de OpenCode Go limitan el enrutamiento cuando están frescas; cupos desconocidos no se estiman ni se tratan como cero. La ejecución transmite eventos JSON de OpenCode, Claude Code o Codex al panel. ChePrompt no copia credenciales ni activa aprobaciones automáticas; Claude Pro se usa solo mediante el CLI oficial de Claude Code, y cada CLI conserva su autenticación en su almacén oficial.
 

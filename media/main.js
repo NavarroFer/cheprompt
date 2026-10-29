@@ -9,6 +9,9 @@ const executionPanel = document.getElementById("execution");
 const executionStatus = document.getElementById("execution-status");
 const executionOutput = document.getElementById("execution-output");
 const cancelExecutionButton = document.getElementById("cancel-execution");
+const executionChanges = document.getElementById("execution-changes");
+const executionChangesTitle = document.getElementById("execution-changes-title");
+const executionChangesList = document.getElementById("execution-changes-list");
 const decisionPanel = document.getElementById("decision");
 const routingNotice = document.getElementById("routing-notice");
 const overrideCandidateSelect = document.getElementById("override-candidate");
@@ -65,6 +68,7 @@ let currentExecutionRuntime = "opencode";
 let latestDecision;
 let currentEvaluationRecordId;
 const evaluationCasesById = new Map();
+const workspaceChangeItems = new Map();
 const parallelTaskElements = new Map();
 let parallelHistoryRecords = [];
 
@@ -97,6 +101,11 @@ analyzeButton.addEventListener("click", () => {
 });
 
 executeButton.addEventListener("click", () => {
+  prepareExecutionPanel();
+  vscode.postMessage({ type: "execute" });
+});
+
+function prepareExecutionPanel() {
   currentExecutionRuntime = latestDecision?.selected.runtimeId || "opencode";
   const runtimeName = currentExecutionRuntime === "claude-code"
     ? "Claude Code"
@@ -111,8 +120,10 @@ executeButton.addEventListener("click", () => {
   executionOutput.replaceChildren();
   executionStatus.textContent = `Iniciando ${runtimeName}…`;
   cancelExecutionButton.disabled = false;
-  vscode.postMessage({ type: "execute" });
-});
+  workspaceChangeItems.clear();
+  executionChangesList.replaceChildren();
+  executionChanges.classList.add("hidden");
+}
 
 executeClaudeButton.addEventListener("click", () => {
   executeClaudeButton.disabled = true;
@@ -180,7 +191,7 @@ interactiveFallbackButton.addEventListener("click", () => {
   interactiveFallbackButton.disabled = true;
   executionPanel.classList.remove("hidden");
   analyzeButton.disabled = true;
-  executionStatus.textContent = "Cancelando la ejecución actual y abriendo la terminal interactiva…";
+  executionStatus.textContent = "Abriendo la terminal interactiva…";
   vscode.postMessage({ type: "interactiveFallback" });
 });
 
@@ -486,7 +497,9 @@ window.addEventListener("message", ({ data }) => {
     if (result.status === "succeeded") {
       executionStatus.textContent = `${runtimeName} terminó correctamente.`;
     } else if (result.status === "cancelled") {
-      executionStatus.textContent = "Ejecución cancelada.";
+      executionStatus.textContent = data.handedOff
+        ? "Ejecución pasada a la terminal interactiva; sigue en la misma sesión."
+        : "Ejecución cancelada.";
     } else {
       executionStatus.textContent = result.error || `${runtimeName} terminó con un error.`;
     }
@@ -521,6 +534,17 @@ window.addEventListener("message", ({ data }) => {
     codexLoginButton.disabled = !codexInstalled;
     interactiveFallbackButton.disabled = !isRuntimeAvailable(latestDecision?.selected.runtimeId);
     executionStatus.textContent = data.message;
+    return;
+  }
+
+  if (data.type === "workspaceChanges") {
+    for (const change of data.changes || []) renderWorkspaceChange(change);
+    return;
+  }
+
+  if (data.type === "interactiveFallbackDeclined") {
+    interactiveFallbackButton.disabled = !isRuntimeAvailable(latestDecision?.selected.runtimeId);
+    if (!cancelExecutionButton.disabled) executionStatus.textContent = "La ejecución sigue en curso.";
     return;
   }
 
@@ -672,7 +696,44 @@ window.addEventListener("message", ({ data }) => {
   codexInteractiveButton.disabled = decisionLocked || !codexAvailable;
   applyOverrideButton.disabled = decisionLocked;
   decisionPanel.classList.remove("hidden");
+  if (data.autoExecute && !decisionLocked) {
+    status.textContent = decision.routingNotice?.message
+      ?? `${decision.selected.label} elegido automáticamente. Ejecutando…`;
+    applyOverrideButton.disabled = true;
+    prepareExecutionPanel();
+  }
 });
+
+const changeKindLabels = { created: "NUEVO", changed: "MODIFICADO", deleted: "ELIMINADO" };
+
+function renderWorkspaceChange(change) {
+  if (!change || typeof change.path !== "string" || !changeKindLabels[change.kind]) return;
+  let item = workspaceChangeItems.get(change.path);
+  if (!item) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "change-item";
+    const kind = document.createElement("span");
+    kind.className = "change-kind";
+    const path = document.createElement("span");
+    path.className = "change-path";
+    path.textContent = change.path;
+    button.append(kind, path);
+    button.addEventListener("click", () => {
+      vscode.postMessage({ type: "openChange", path: change.path });
+    });
+    const listItem = document.createElement("li");
+    listItem.append(button);
+    executionChangesList.append(listItem);
+    item = { button, kind };
+    workspaceChangeItems.set(change.path, item);
+  }
+  item.kind.textContent = changeKindLabels[change.kind];
+  item.kind.dataset.kind = change.kind;
+  item.button.title = `Abrir cambios de ${change.path}`;
+  executionChangesTitle.textContent = `Archivos modificados · ${workspaceChangeItems.size}`;
+  executionChanges.classList.remove("hidden");
+}
 
 function renderExecutionEvent(event) {
   if (event.type === "started") {

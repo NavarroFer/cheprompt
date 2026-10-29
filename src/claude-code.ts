@@ -279,7 +279,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
           : "succeeded";
       const error = completion.error
         ? "No se pudo iniciar Claude Code."
-        : reportedError ?? (completion.exitCode !== 0 ? `Claude Code terminó con código ${completion.exitCode}.` : undefined);
+        : reportedError ?? (completion.exitCode !== 0 && !cancelled ? `Claude Code terminó con código ${completion.exitCode}.` : undefined);
       if (completion.error || (completion.exitCode !== 0 && !failureKind)) failureKind = "process";
       if (malformedOutput) failureKind = "protocol";
       if (approvalRequired) failureKind = "approval";

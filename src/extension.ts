@@ -1,6 +1,13 @@
 import * as vscode from "vscode";
 import { randomUUID } from "node:crypto";
 import {
+  mergeChangeKind,
+  parseIgnoredPaths,
+  reportableChangePath,
+  resolveChangePath,
+  WorkspaceChangeKind,
+} from "./changes";
+import {
   ClaudeCodeAdapter,
   launchClaudeCodeInteractive,
   launchClaudeCodeLogin,
@@ -34,6 +41,7 @@ import {
 } from "./evaluation";
 import {
   launchOpenCodeInteractive,
+  NodeProcessExecutor,
   OpenCodeAdapter,
   OpenCodeExecutionAdapter,
   RuntimeExecutionHandle,
@@ -49,6 +57,9 @@ import {
   RuntimeModel,
   UsageSnapshot,
 } from "./types";
+
+const CHANGE_FLUSH_MS = 300;
+const CHANGE_SETTLE_MS = 1_500;
 
 export function activate(context: vscode.ExtensionContext): void {
   const provider = new ChePromptViewProvider(
@@ -80,6 +91,9 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
   private codexInventory?: RuntimeInventory;
   private evaluationHistory: EvaluationRecord[];
   private activeExecution?: RuntimeExecutionHandle;
+  private handedOffExecutionId?: string;
+  private changeRoot?: string;
+  private readonly processExecutor = new NodeProcessExecutor();
   private activeRuntime: "opencode" | "claude-code" | "codex" = "opencode";
   private lastExecutionRuntime: "opencode" | "claude-code" | "codex" = "opencode";
   private lastExecutionSessionId?: string;
@@ -251,7 +265,9 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
           );
           this.lastPrompt = message.prompt.trim();
           this.lastDecision = decision;
-          await view.webview.postMessage({ type: "decision", decision });
+          const autoExecute = vscode.workspace.getConfiguration("cheprompt").get<boolean>("executeOnSend", true);
+          await view.webview.postMessage({ type: "decision", decision, autoExecute });
+          if (autoExecute) this.startSelectedRoute(view.webview);
         } catch (error) {
           await view.webview.postMessage({
             type: "error",
@@ -283,12 +299,12 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
           return;
         }
 
-        const selectedRuntime = this.lastDecision.selected.runtimeId;
-        if (!isRuntimeId(selectedRuntime)) {
-          await view.webview.postMessage({ type: "executionError", message: "El runtime seleccionado no es compatible." });
-          return;
-        }
-        this.startExecution(view.webview, selectedRuntime);
+        this.startSelectedRoute(view.webview);
+        return;
+      }
+
+      if (message.type === "openChange") {
+        await this.openWorkspaceChange(message.path);
         return;
       }
 
@@ -1060,8 +1076,17 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    this.executionsForPrompt += 1;
     const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!cwd) {
+      void webview.postMessage({
+        type: "executionError",
+        runtimeId: runtime,
+        message: "Abrí la carpeta del proyecto en VS Code antes de ejecutar. ChePrompt no ejecuta tareas fuera de un workspace.",
+      });
+      return;
+    }
+
+    this.executionsForPrompt += 1;
     try {
       const onEvent = (event: RuntimeExecutionEvent) => {
         if (event.sessionId) this.lastExecutionSessionId = event.sessionId;
@@ -1084,6 +1109,11 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
       this.activeExecution = execution;
       this.activeRuntime = runtime;
       this.lastExecutionRuntime = runtime;
+      this.changeRoot = cwd;
+      const changeTracker = this.trackWorkspaceChanges(webview, cwd, execution.executionId);
+      // Let the file watcher deliver writes made just before the process exited.
+      const stopTracking = () => { setTimeout(() => changeTracker.dispose(), CHANGE_SETTLE_MS); };
+      void execution.result.then(stopTracking, stopTracking);
       void execution.result.then(async (result) => {
         if (result.sessionId) this.lastExecutionSessionId = result.sessionId;
         if (this.activeExecution === execution) this.activeExecution = undefined;
@@ -1112,6 +1142,7 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
           runtimeId: runtime,
           evaluationRecordId: evaluationRecord.id,
           canExecuteAgain: !this.taskSucceeded && this.executionsForPrompt < MAX_TASK_EXECUTION_ATTEMPTS,
+          handedOff: this.handedOffExecutionId === execution.executionId,
         });
         if (this.taskSucceeded && this.lastDecision) {
           await webview.postMessage({ type: "decision", decision: this.lastDecision });
@@ -1189,6 +1220,17 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async openInteractiveFallback(webview: vscode.Webview): Promise<void> {
+    if (this.activeExecution) {
+      const choice = await vscode.window.showWarningMessage(
+        "La ejecución en curso se va a detener y seguirá en una terminal interactiva con la misma sesión.",
+        { modal: true },
+        "Pasar a la terminal",
+      );
+      if (choice !== "Pasar a la terminal") {
+        await webview.postMessage({ type: "interactiveFallbackDeclined" });
+        return;
+      }
+    }
     const runtime = this.activeExecution
       ? this.activeRuntime
       : this.lastDecision?.selected.runtimeId ?? this.lastExecutionRuntime;
@@ -1205,14 +1247,8 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    let sessionId = this.lastExecutionRuntime === "opencode" ? this.lastExecutionSessionId : undefined;
-    if (this.activeExecution) {
-      const execution = this.activeExecution;
-      execution.cancel();
-      const result = await execution.result;
-      sessionId = result.sessionId ?? sessionId;
-      if (this.activeExecution === execution) this.activeExecution = undefined;
-    }
+    const previousSessionId = this.lastExecutionRuntime === "opencode" ? this.lastExecutionSessionId : undefined;
+    const sessionId = (await this.handOffActiveExecution()) ?? previousSessionId;
 
     try {
       launchOpenCodeInteractive(this.lastPrompt, this.lastDecision, sessionId);
@@ -1244,14 +1280,8 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    let sessionId = this.lastExecutionRuntime === "claude-code" ? this.lastExecutionSessionId : undefined;
-    if (this.activeExecution) {
-      const execution = this.activeExecution;
-      execution.cancel();
-      const result = await execution.result;
-      sessionId = result.sessionId ?? sessionId;
-      if (this.activeExecution === execution) this.activeExecution = undefined;
-    }
+    const previousSessionId = this.lastExecutionRuntime === "claude-code" ? this.lastExecutionSessionId : undefined;
+    const sessionId = (await this.handOffActiveExecution()) ?? previousSessionId;
 
     try {
       launchClaudeCodeInteractive(this.lastPrompt, sessionId);
@@ -1284,14 +1314,8 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    let sessionId = this.lastExecutionRuntime === "codex" ? this.lastExecutionSessionId : undefined;
-    if (this.activeExecution) {
-      const execution = this.activeExecution;
-      execution.cancel();
-      const result = await execution.result;
-      sessionId = result.sessionId ?? sessionId;
-      if (this.activeExecution === execution) this.activeExecution = undefined;
-    }
+    const previousSessionId = this.lastExecutionRuntime === "codex" ? this.lastExecutionSessionId : undefined;
+    const sessionId = (await this.handOffActiveExecution()) ?? previousSessionId;
 
     try {
       const executable = vscode.workspace.getConfiguration("cheprompt").get<string>("codexPath", "codex");
@@ -1313,6 +1337,114 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         message: error instanceof Error ? error.message : "No se pudo abrir Codex interactivo.",
       });
     }
+  }
+
+  private startSelectedRoute(webview: vscode.Webview): void {
+    const selectedRuntime = this.lastDecision?.selected.runtimeId;
+    if (!selectedRuntime || !isRuntimeId(selectedRuntime)) {
+      void webview.postMessage({ type: "executionError", message: "El runtime seleccionado no es compatible." });
+      return;
+    }
+    this.startExecution(webview, selectedRuntime);
+  }
+
+  private trackWorkspaceChanges(webview: vscode.Webview, root: string, executionId: string): vscode.Disposable {
+    const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, "**/*"));
+    const reported = new Map<string, WorkspaceChangeKind>();
+    const pending = new Map<string, WorkspaceChangeKind>();
+    let timer: NodeJS.Timeout | undefined;
+
+    const flush = async () => {
+      timer = undefined;
+      const batch = [...pending];
+      pending.clear();
+      const files: Array<[string, WorkspaceChangeKind]> = [];
+      for (const [path, kind] of batch) {
+        if (kind === "deleted") {
+          files.push([path, kind]);
+          continue;
+        }
+        try {
+          const stat = await vscode.workspace.fs.stat(vscode.Uri.file(resolveChangePath(root, path)!));
+          if (stat.type !== vscode.FileType.Directory) files.push([path, kind]);
+        } catch {
+          // Removed before it could be inspected; its delete event reports it.
+        }
+      }
+      const ignored = await this.ignoredPaths(root, files.map(([path]) => path));
+      const changes = files
+        .filter(([path]) => !ignored.has(path))
+        .map(([path, kind]) => {
+          const merged = mergeChangeKind(reported.get(path), kind);
+          reported.set(path, merged);
+          return { path, kind: merged };
+        });
+      if (changes.length) await webview.postMessage({ type: "workspaceChanges", executionId, changes });
+    };
+
+    const record = (kind: WorkspaceChangeKind) => (uri: vscode.Uri) => {
+      const path = reportableChangePath(root, uri.fsPath);
+      if (!path) return;
+      pending.set(path, mergeChangeKind(pending.get(path), kind));
+      timer ??= setTimeout(() => void flush(), CHANGE_FLUSH_MS);
+    };
+    const subscriptions = [
+      watcher.onDidCreate(record("created")),
+      watcher.onDidChange(record("changed")),
+      watcher.onDidDelete(record("deleted")),
+      watcher,
+    ];
+    return new vscode.Disposable(() => {
+      for (const subscription of subscriptions) subscription.dispose();
+      if (timer) {
+        clearTimeout(timer);
+        void flush();
+      }
+    });
+  }
+
+  private async ignoredPaths(root: string, paths: string[]): Promise<Set<string>> {
+    if (!paths.length) return new Set();
+    try {
+      const result = await this.processExecutor.run("git", ["check-ignore", "--", ...paths], { cwd: root });
+      // Exit 1 means nothing is ignored; other codes (for example, not a Git repository) disable filtering.
+      return result.exitCode === 0 ? parseIgnoredPaths(result.stdout) : new Set();
+    } catch {
+      return new Set();
+    }
+  }
+
+  private async openWorkspaceChange(path: string): Promise<void> {
+    const root = this.changeRoot;
+    const filePath = root ? resolveChangePath(root, path) : undefined;
+    if (!root || !filePath) return;
+    const uri = vscode.Uri.file(filePath);
+    const repository = await this.processExecutor
+      .run("git", ["rev-parse", "--is-inside-work-tree"], { cwd: root })
+      .then((result) => result.exitCode === 0, () => false);
+    if (repository) {
+      try {
+        await vscode.commands.executeCommand("git.openChange", uri);
+        return;
+      } catch {
+        // Fall back to the file itself when the built-in Git extension is unavailable.
+      }
+    }
+    try {
+      await vscode.window.showTextDocument(uri, { preview: true });
+    } catch {
+      void vscode.window.showWarningMessage("Ese archivo ya no existe en el workspace.");
+    }
+  }
+
+  private async handOffActiveExecution(): Promise<string | undefined> {
+    const execution = this.activeExecution;
+    if (!execution) return undefined;
+    this.handedOffExecutionId = execution.executionId;
+    execution.cancel();
+    const result = await execution.result;
+    if (this.activeExecution === execution) this.activeExecution = undefined;
+    return result.sessionId;
   }
 
   private getHtml(webview: vscode.Webview): string {
@@ -1344,6 +1476,24 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
     </header>
 
     <main>
+      <section class="composer" aria-labelledby="composer-title">
+        <div class="composer-heading">
+          <label id="composer-title" for="prompt">¿Qué querés resolver?</label>
+          <span class="composer-shortcut">⌘/Ctrl + Enter</span>
+        </div>
+        <textarea id="prompt" rows="5" placeholder="Ej.: Investigá por qué falla el login y proponé un arreglo con tests."></textarea>
+        <div class="composer-footer">
+          <label class="profile-label" for="profile">Perfil
+            <select id="profile">
+              <option value="economy">Económico</option>
+              <option value="balanced">Equilibrado</option>
+              <option value="quality">Máxima calidad</option>
+            </select>
+          </label>
+          <button id="analyze" class="primary" type="button">Dale</button>
+        </div>
+      </section>
+
       <section class="allowance-strip" aria-label="Cupos por runtime">
         <article id="usage" class="allowance-card allowance-opencode">
           <div class="card-heading">
@@ -1389,24 +1539,6 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
           </div>
           <p class="quota-note">La API key usa facturación aparte.</p>
         </article>
-      </section>
-
-      <section class="composer" aria-labelledby="composer-title">
-        <div class="composer-heading">
-          <label id="composer-title" for="prompt">¿Qué querés resolver?</label>
-          <span class="composer-shortcut">⌘/Ctrl + Enter</span>
-        </div>
-        <textarea id="prompt" rows="5" placeholder="Ej.: Investigá por qué falla el login y proponé un arreglo con tests."></textarea>
-        <div class="composer-footer">
-          <label class="profile-label" for="profile">Perfil
-            <select id="profile">
-              <option value="economy">Económico</option>
-              <option value="balanced">Equilibrado</option>
-              <option value="quality">Máxima calidad</option>
-            </select>
-          </label>
-          <button id="analyze" class="primary" type="button">Dale</button>
-        </div>
       </section>
 
       <details id="parallel-panel" class="parallel-panel inventory">
@@ -1489,6 +1621,10 @@ class ChePromptViewProvider implements vscode.WebviewViewProvider {
         <h2 id="execution-title">Salida del runtime</h2>
         <p id="execution-status" role="status"></p>
         <div id="execution-output" class="execution-output" aria-live="off"></div>
+        <div id="execution-changes" class="execution-changes hidden">
+          <h3 id="execution-changes-title">Archivos modificados</h3>
+          <ul id="execution-changes-list" aria-labelledby="execution-changes-title"></ul>
+        </div>
         <div class="execution-controls">
           <button id="cancel-execution" class="secondary" type="button">Cancelar</button>
           <button id="interactive-fallback" class="secondary" type="button">Abrir terminal interactiva</button>
@@ -1548,6 +1684,7 @@ type ParallelWorktreeMessage = { type: "openParallelWorktree" | "removeParallelW
 type RefreshUsageMessage = { type: "refreshUsage" };
 type CancelExecutionMessage = { type: "cancelExecution" };
 type InteractiveFallbackMessage = { type: "interactiveFallback" };
+type OpenChangeMessage = { type: "openChange"; path: string };
 type SelectClaudeMessage = { type: "selectClaude" };
 type ClaudeInteractiveMessage = { type: "claudeInteractive" };
 type RefreshClaudeMessage = { type: "refreshClaude" };
@@ -1582,6 +1719,7 @@ function isWebviewMessage(value: unknown): value is
   | RefreshUsageMessage
   | CancelExecutionMessage
   | InteractiveFallbackMessage
+  | OpenChangeMessage
   | SelectClaudeMessage
   | ClaudeInteractiveMessage
   | RefreshClaudeMessage
@@ -1628,6 +1766,7 @@ function isWebviewMessage(value: unknown): value is
     ["economy", "balanced", "quality"].includes(String(candidate.profile)) &&
     typeof candidate.independenceConfirmed === "boolean"
   ) return true;
+  if (candidate.type === "openChange" && typeof candidate.path === "string") return true;
   if (
     ["openParallelWorktree", "removeParallelWorktree"].includes(String(candidate.type)) &&
     typeof candidate.runId === "string" &&

@@ -324,4 +324,5 @@ test("treats malformed JSONL as failed and supports cancellation", async () => {
   const cancelled = await execution.result;
   assert.equal(pending.cancelCalls, 1);
   assert.equal(cancelled.status, "cancelled");
+  assert.equal(cancelled.error, undefined);
 });

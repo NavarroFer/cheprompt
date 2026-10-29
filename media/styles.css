@@ -93,7 +93,7 @@ p {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
   gap: 8px;
-  margin-bottom: 12px;
+  margin: 12px 0;
 }
 
 .allowance-card {
@@ -648,6 +648,60 @@ li {
 
 .execution-output .execution-approval_required {
   color: var(--cp-warning);
+}
+
+.execution-changes {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--cp-border);
+}
+
+.execution-changes h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+#execution-changes-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.change-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 8px;
+  font-weight: 500;
+  text-align: left;
+}
+
+.change-kind {
+  flex: 0 0 auto;
+  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--cp-cyan);
+}
+
+.change-kind[data-kind="created"] {
+  color: var(--cp-lime);
+}
+
+.change-kind[data-kind="deleted"] {
+  color: var(--cp-danger);
+}
+
+.change-path {
+  min-width: 0;
+  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .execution-controls {

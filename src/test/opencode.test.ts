@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import {
+  NodeStreamingProcessSpawner,
   OpenCodeAdapter,
   parseOpenCodeUsageLimits,
   ProcessExecutor,
   ProcessResult,
+  streamingProcessEnvironment,
   USAGE_LIMITS_ENDPOINT,
   USAGE_SNAPSHOT_MAX_AGE_MS,
 } from "../opencode";
@@ -157,4 +162,29 @@ test("treats a failed official usage request as unknown, never as exhausted", as
   assert.equal(snapshot.status, "unknown");
   assert.deepEqual(snapshot.windows, []);
   assert.equal(JSON.stringify(snapshot).includes("private detail"), false);
+});
+
+test("aligns PWD with the execution directory so runtimes do not resolve the extension host directory", () => {
+  const inherited = { PATH: "/usr/bin", PWD: "/" };
+
+  assert.deepEqual(streamingProcessEnvironment("/repo", inherited), { PATH: "/usr/bin", PWD: "/repo" });
+  assert.equal(inherited.PWD, "/");
+  assert.equal(streamingProcessEnvironment("/repo", undefined)?.PWD, "/repo");
+  assert.equal(streamingProcessEnvironment(undefined, inherited), inherited);
+});
+
+test("starts streaming processes with PWD set to their working directory", async () => {
+  const cwd = realpathSync(mkdtempSync(join(tmpdir(), "cheprompt-pwd-")));
+  const child = new NodeStreamingProcessSpawner().start(
+    process.execPath,
+    ["-e", "process.stdout.write(JSON.stringify({ pwd: process.env.PWD, cwd: process.cwd() }))"],
+    cwd,
+    { ...process.env, PWD: "/" },
+  );
+  let stdout = "";
+  for await (const chunk of child.stdout) stdout += chunk;
+  const completion = await child.completion;
+
+  assert.equal(completion.exitCode, 0);
+  assert.deepEqual(JSON.parse(stdout), { pwd: cwd, cwd });
 });

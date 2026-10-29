@@ -8,9 +8,11 @@ This file is the compact handoff for the next human or coding-agent session.
 
 M7 — Parallel agents and worktrees.
 
-Status: User confirms integrated M4/M4.5/M5/M6 Extension Development Host validation, responsive checks and representative synthetic outcomes are complete (2026-10-28). M7 implementation is complete; its new UI and real worktree lifecycle still need Extension Development Host validation.
+Status: User confirms integrated M4/M4.5/M5/M6 Extension Development Host validation, responsive checks and representative synthetic outcomes are complete (2026-10-28). M7 is committed as `866d6ef`; its new UI and real worktree lifecycle still need Extension Development Host validation. An execution-directory bug fix and a composer-first layout change are implemented and tested but not yet committed or F5-validated.
 
-Exact next action: commit the tested M7 implementation atomically so the workspace is clean; then press `F5` and test explicit two-task review/execute, dirty/non-Git workspace blocking, output/worktree inspection, cancellation, explicit cleanup and prompt-free history.
+M8 (chat-like execute-on-send plus live file-change list) was requested by the user and is implemented and tested but not yet F5-validated or committed.
+
+Exact next action: reload the window and confirm: a single OpenCode execution runs in the open folder; the composer is the first panel block; **Dale** starts the chosen route immediately and **Archivos modificados** fills while the agent writes, opening VS Code diffs; **Abrir terminal interactiva** during a run asks for confirmation; disabling `cheprompt.executeOnSend` restores review mode. Then commit the fixes and M8 separately; then press `F5` and test M7 two-task review/execute, dirty/non-Git workspace blocking, output/worktree inspection, cancellation, explicit cleanup and prompt-free history.
 
 ## Repository state
 
@@ -28,7 +30,7 @@ Exact next action: commit the tested M7 implementation atomically so the workspa
 - M7 implements exactly two user-authored independent subtasks, separate route review, parallel execution from one pinned commit, one detached worktree per task, cancellation, explicit open/remove controls, and local parent/child history without prompts.
 - M7 worktrees require a clean Git repo and persist in VS Code extension storage until explicitly removed; changes are not merged automatically.
 - Build/typecheck: passing (`npm run check`).
-- Tests: 75 passing, including parallel task validation, worktree safety, interruption recovery, route review, outcome aggregation and history privacy.
+- Tests: 85 passing, including execute-on-send, workspace change listing/path safety, OpenCode tool targets, streaming-process PWD alignment, interactive handoff reporting, parallel task validation, worktree safety, interruption recovery, route review, outcome aggregation and history privacy.
 - npm audit: no known vulnerabilities after removing the optional publishing dependency.
 - Distribution: local only; Marketplace publishing is out of scope.
 
@@ -54,6 +56,7 @@ Exact next action: commit the tested M7 implementation atomically so the workspa
 - Codex auth/quota failures temporarily disable the runtime. Codex usage is `Not available` because the official `/usage` command reports token activity, not an exact remaining percentage.
 - The panel offers 20 synthetic evaluation cases and stores local outcome records capped at 100 entries. Records include route, runtime/model, latency, officially reported token usage, reported retries and manual verification, but never the raw prompt or payment data.
 - The CLI is never launched with `--auto`.
+- With `cheprompt.executeOnSend` (default on), sending a prompt routes and executes immediately; the panel lists files changed during the run and opens VS Code diffs. Fallbacks and overrides still require review.
 - The project can be installed locally with `npm run install:local`.
 
 ## What is not yet validated or implemented
@@ -134,7 +137,11 @@ M5 implementation validation on 2026-10-28: `npm run check`, `npm test` (63 test
 
 M6 implementation validation on 2026-10-28: `npm run check` passed; `npm test` passed (66 tests). User confirmed integrated F5 validation of objective fallback, approval/cancel exclusions, attempt-budget exhaustion and low-confidence notice. Fallback remains explicitly reviewed and never auto-starts.
 
-M7 implementation validation on 2026-10-28: `npm run check`, `npm test` (75 tests), `node --check media/main.js` and `git diff --check` passed. Tests use fake Git/runtime boundaries; no provider CLI was launched. F5 validation remains pending for UI review, real detached worktree creation, parallel streaming/cancellation, history and explicit cleanup. M6 was committed as `077fccc`; M7 changes are not yet committed.
+M7 implementation validation on 2026-10-28: `npm run check`, `npm test` (75 tests), `node --check media/main.js` and `git diff --check` passed. Tests use fake Git/runtime boundaries; no provider CLI was launched. F5 validation remains pending for UI review, real detached worktree creation, parallel streaming/cancellation, history and explicit cleanup. M6 was committed as `077fccc`; M7 was committed as `866d6ef`.
+
+Execution-directory fix on 2026-10-28: a real OpenCode run from the `crespodetail` window was recorded with `location.directory: "/"`, so the agent searched `~` instead of the project; the reported exit code 130 was the SIGINT sent when the user opened the interactive terminal. Root cause, reproduced with OpenCode 2.2.0 and an invalid model (no tokens): `opencode run` resolves its project from `PWD`, which Node's `spawn({ cwd })` does not update, and the VS Code extension host inherits `PWD=/`. The shared streaming spawner now sets `PWD` to the execution `cwd` for every runtime, including M7 worktree tasks, and single executions are refused when no workspace folder is open. The prompt composer now renders before the allowance cards. `npm run check`, `npm test` (77 tests), `node --check media/main.js` and `git diff --check` passed; F5 validation pending.
+
+Interactive handoff fix on 2026-10-28: a second real run executed correctly in `crespodetail` but was interrupted 100 ms before `opencode --session` started, i.e. by **Abrir terminal interactiva**, which silently cancelled the active run; its late `executionResult` then overwrote the terminal-opened status with "Ejecución cancelada" and a misleading exit-code-130 error. Handoff of a running execution now requires a VS Code modal confirmation, is reported as continuing in the same terminal session, and user cancellation no longer surfaces the exit code as an error for OpenCode, Claude Code or Codex. `npm run check`, `npm test` (78 tests), `node --check media/main.js` and `git diff --check` passed; F5 validation pending.
 
 ## Session completion checklist
 

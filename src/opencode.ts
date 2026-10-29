@@ -83,7 +83,7 @@ export class NodeStreamingProcessSpawner implements StreamingProcessSpawner {
   start(executable: string, args: readonly string[], cwd?: string, env?: NodeJS.ProcessEnv): StreamingProcess {
     const child = spawn(executable, [...args], {
       cwd,
-      env,
+      env: streamingProcessEnvironment(cwd, env),
       stdio: ["ignore", "pipe", "pipe"],
     });
     let spawnError: Error | undefined;
@@ -102,6 +102,14 @@ export class NodeStreamingProcessSpawner implements StreamingProcessSpawner {
       cancel: () => { child.kill("SIGINT"); },
     };
   }
+}
+
+export function streamingProcessEnvironment(
+  cwd: string | undefined,
+  env: NodeJS.ProcessEnv | undefined,
+): NodeJS.ProcessEnv | undefined {
+  // Node does not update PWD for `cwd`, and OpenCode resolves its project directory from PWD.
+  return cwd ? { ...(env ?? process.env), PWD: cwd } : env;
 }
 
 export class OpenCodeExecutionAdapter {
@@ -194,10 +202,13 @@ export class OpenCodeExecutionAdapter {
       }
       if (value.type === "tool_use") {
         const part = isRecord(value.part) ? value.part : undefined;
+        const target = describeToolTarget(part?.state, cwd);
         emit("tool", {
           sessionId: eventSessionId,
           timestamp: time,
-          message: typeof part?.tool === "string" ? part.tool : "OpenCode ejecutó una herramienta.",
+          message: typeof part?.tool === "string"
+            ? (target ? `${part.tool} · ${target}` : part.tool)
+            : "OpenCode ejecutó una herramienta.",
         });
         return;
       }
@@ -233,7 +244,7 @@ export class OpenCodeExecutionAdapter {
           : "succeeded";
       const error = completion.error
         ? "No se pudo iniciar OpenCode."
-        : reportedError ?? (completion.exitCode !== 0 ? `OpenCode terminó con código ${completion.exitCode}.` : undefined);
+        : reportedError ?? (completion.exitCode !== 0 && !cancelled ? `OpenCode terminó con código ${completion.exitCode}.` : undefined);
       const failureKind = status !== "failed"
         ? undefined
         : approvalRequired
@@ -268,6 +279,20 @@ export class OpenCodeExecutionAdapter {
       },
     };
   }
+}
+
+const TOOL_TARGET_KEYS = ["filePath", "path", "pattern", "command", "url"] as const;
+const TOOL_TARGET_MAX_LENGTH = 80;
+
+export function describeToolTarget(state: unknown, cwd: string | undefined): string | undefined {
+  const input = isRecord(state) && isRecord(state.input) ? state.input : undefined;
+  const value = TOOL_TARGET_KEYS
+    .map((key) => input?.[key])
+    .find((candidate): candidate is string => typeof candidate === "string" && candidate.trim() !== "");
+  if (!value) return undefined;
+  const relative = cwd && value.startsWith(`${cwd}/`) ? value.slice(cwd.length + 1) : value;
+  const line = relative.replace(/\s+/g, " ").trim();
+  return line.length > TOOL_TARGET_MAX_LENGTH ? `${line.slice(0, TOOL_TARGET_MAX_LENGTH - 1)}…` : line;
 }
 
 async function drain(stream: AsyncIterable<string>): Promise<void> {

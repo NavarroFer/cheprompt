@@ -68,6 +68,11 @@
           "default": "balanced",
           "description": "Perfil de routing usado al abrir ChePrompt."
         },
+        "cheprompt.executeOnSend": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ejecuta la ruta elegida apenas enviás el prompt, como un chat. Desactivalo para revisar la decisión antes de ejecutar. Los fallbacks siempre requieren revisión."
+        },
         "cheprompt.opencodePath": {
           "type": "string",
           "default": "opencode",

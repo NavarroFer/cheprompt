@@ -293,7 +293,7 @@ export class CodexAdapter implements RuntimeAdapter {
           : "succeeded";
       const error = completion.error
         ? "No se pudo iniciar Codex CLI."
-        : reportedError ?? (completion.exitCode !== 0 ? "Codex terminó con un error." : undefined);
+        : reportedError ?? (completion.exitCode !== 0 && !cancelled ? "Codex terminó con un error." : undefined);
       const failureKind = status !== "failed"
         ? undefined
         : completion.error
